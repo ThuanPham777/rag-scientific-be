@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,20 +7,247 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  USER
-  ADMIN
+model answer_citation {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  qa_turn_id        String?        @db.Uuid
+  chunk_id          String?        @db.Uuid
+  element_id        String?        @db.Uuid
+  page_number       Int?
+  source_snippet    String?
+  answer_span_start Int?
+  answer_span_end   Int?
+  relevance_score   Float?
+  is_primary        Boolean?
+  created_at        DateTime?      @default(now()) @db.Timestamp(6)
+  chunk             chunk?         @relation(fields: [chunk_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_element     paper_element? @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  qa_turn           qa_turn?       @relation(fields: [qa_turn_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
-model AppUser {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  displayName  String?
-  role         UserRole @default(USER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@map("app_users")
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model app_user {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email            String             @unique
+  password_hash    String
+  display_name     String?
+  role             String?            @default("user")
+  avatar_url       String?
+  is_active        Boolean?           @default(true)
+  last_login_at    DateTime?          @db.Timestamp(6)
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
+  conversation     conversation[]
+  paper            paper[]
+  selection_region selection_region[]
 }
 
+model chunk {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id        String?           @db.Uuid
+  section_id      String?           @db.Uuid
+  page_start      Int?
+  page_end        Int?
+  content         String?
+  token_count     Int?
+  chunk_index     Int?
+  embedding       String?
+  external_vec_id String?
+  splitter_name   String?
+  splitter_params Json?
+  created_at      DateTime?         @default(now()) @db.Timestamp(6)
+  answer_citation answer_citation[]
+  paper           paper?            @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_section   paper_section?    @relation(fields: [section_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  chunk_element   chunk_element[]
+}
+
+model chunk_element {
+  chunk_id      String        @db.Uuid
+  element_id    String        @db.Uuid
+  position      Int?
+  chunk         chunk         @relation(fields: [chunk_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_element paper_element @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([chunk_id, element_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model conversation {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String?   @db.Uuid
+  paper_id    String?   @db.Uuid
+  title       String?
+  mode        String?   @default("novice")
+  description String?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+  paper       paper?    @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  app_user    app_user? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  message     message[]
+  qa_turn     qa_turn[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model formula_insight {
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  selection_region_id    String?           @db.Uuid
+  qa_turn_id             String?           @db.Uuid
+  audience_level         String?
+  variables_json         Json?
+  conceptual_explanation String?
+  pipeline_role          String?
+  assumptions            String?
+  limitations            String?
+  model_name             String?
+  created_at             DateTime?         @default(now()) @db.Timestamp(6)
+  qa_turn                qa_turn?          @relation(fields: [qa_turn_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  selection_region       selection_region? @relation(fields: [selection_region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model message {
+  id                                            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id                               String?       @db.Uuid
+  role                                          String?
+  content                                       String?
+  token_count                                   Int?
+  model_name                                    String?
+  created_at                                    DateTime?     @default(now()) @db.Timestamp(6)
+  conversation                                  conversation? @relation(fields: [conversation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  qa_turn_qa_turn_assistant_message_idTomessage qa_turn[]     @relation("qa_turn_assistant_message_idTomessage")
+  qa_turn_qa_turn_user_message_idTomessage      qa_turn[]     @relation("qa_turn_user_message_idTomessage")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model paper {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_user_id    String?            @db.Uuid
+  title            String?
+  abstract         String?
+  authors          String?
+  publication_year Int?
+  venue            String?
+  source           String?
+  doi              String?
+  arxiv_id         String?
+  url              String?
+  num_pages        Int?
+  status           String?            @default("processing")
+  domain_tag       String?
+  language         String?
+  file_path        String?
+  meta_json        Json?
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
+  chunk            chunk[]
+  conversation     conversation[]
+  app_user         app_user?          @relation(fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_element    paper_element[]
+  paper_page       paper_page[]
+  paper_section    paper_section[]
+  selection_region selection_region[]
+}
+
+model paper_element {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id         String?            @db.Uuid
+  page_id          String?            @db.Uuid
+  section_id       String?            @db.Uuid
+  element_type     String?
+  label            String?
+  order_in_page    Int?
+  bbox_x           Float?
+  bbox_y           Float?
+  bbox_width       Float?
+  bbox_height      Float?
+  raw_text         String?
+  normalized_text  String?
+  confidence       Float?
+  extra_json       Json?
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  answer_citation  answer_citation[]
+  chunk_element    chunk_element[]
+  paper_page       paper_page?        @relation(fields: [page_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper            paper?             @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_section    paper_section?     @relation(fields: [section_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  selection_region selection_region[]
+}
+
+model paper_page {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id         String?            @db.Uuid
+  page_number      Int
+  text             String?
+  image_path       String?
+  width            Int?
+  height           Int?
+  meta_json        Json?
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  paper_element    paper_element[]
+  paper            paper?             @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  selection_region selection_region[]
+}
+
+model paper_section {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id      String?         @db.Uuid
+  section_type  String?
+  heading       String?
+  level         Int?
+  order_index   Int?
+  start_page    Int?
+  end_page      Int?
+  content       String?
+  meta_json     Json?
+  created_at    DateTime?       @default(now()) @db.Timestamp(6)
+  chunk         chunk[]
+  paper_element paper_element[]
+  paper         paper?          @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model qa_turn {
+  id                                            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id                               String?           @db.Uuid
+  user_message_id                               String?           @db.Uuid
+  assistant_message_id                          String?           @db.Uuid
+  mode_snapshot                                 String?
+  retriever_config_json                         Json?
+  generator_config_json                         Json?
+  system_prompt_snapshot                        String?
+  latency_ms                                    Int?
+  token_input                                   Int?
+  token_output                                  Int?
+  cost_usd                                      Decimal?          @db.Decimal
+  created_at                                    DateTime?         @default(now()) @db.Timestamp(6)
+  answer_citation                               answer_citation[]
+  formula_insight                               formula_insight[]
+  message_qa_turn_assistant_message_idTomessage message?          @relation("qa_turn_assistant_message_idTomessage", fields: [assistant_message_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  conversation                                  conversation?     @relation(fields: [conversation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  message_qa_turn_user_message_idTomessage      message?          @relation("qa_turn_user_message_idTomessage", fields: [user_message_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model selection_region {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paper_id        String?           @db.Uuid
+  page_id         String?           @db.Uuid
+  element_id      String?           @db.Uuid
+  selection_type  String?           @default("auto")
+  bbox_x          Float?
+  bbox_y          Float?
+  bbox_width      Float?
+  bbox_height     Float?
+  image_path      String?
+  extracted_text  String?
+  latex           String?
+  created_by_user String?           @db.Uuid
+  created_source  String?
+  meta_json       Json?
+  created_at      DateTime?         @default(now()) @db.Timestamp(6)
+  formula_insight formula_insight[]
+  app_user        app_user?         @relation(fields: [created_by_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_element   paper_element?    @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper_page      paper_page?       @relation(fields: [page_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  paper           paper?            @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
