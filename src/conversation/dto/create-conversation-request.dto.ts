@@ -1,24 +1,13 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
-
-export enum ConversationMode {
-  novice = 'novice',
-  researcher = 'researcher',
-  reviewer = 'reviewer',
-}
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
 export class CreateConversationRequestDto {
-  @ApiProperty()
-  @IsUUID()
+  @ApiProperty({ description: 'Paper ID or RAG file_id' })
+  @IsString()
   paperId: string;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional({ description: 'Conversation title' })
   @IsOptional()
   @IsString()
   title?: string;
-
-  @ApiProperty({ enum: ConversationMode, required: false })
-  @IsOptional()
-  @IsEnum(ConversationMode)
-  mode?: ConversationMode;
 }

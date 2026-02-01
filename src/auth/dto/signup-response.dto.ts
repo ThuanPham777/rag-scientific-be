@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
+import { BaseResponseDto } from '../../common/dto/base-response.dto';
 
 export class SignupUserResponseDto {
   @ApiProperty({ description: 'User ID', example: 'uuid-here' })
@@ -12,14 +12,14 @@ export class SignupUserResponseDto {
   displayName?: string;
 
   @ApiProperty({
-    description: 'User role',
-    example: 'USER',
-    enum: ['USER', 'ADMIN'],
+    description: 'Auth provider',
+    example: 'LOCAL',
+    enum: ['LOCAL', 'GOOGLE'],
   })
-  role: string;
+  provider: string;
 }
 
 export class SignupResponseDto extends BaseResponseDto<SignupUserResponseDto> {
   @ApiProperty({ type: SignupUserResponseDto })
-  user: SignupUserResponseDto;
+  declare data: SignupUserResponseDto;
 }

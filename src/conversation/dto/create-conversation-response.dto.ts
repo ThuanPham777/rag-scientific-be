@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
 export class ConversationItemDto {
@@ -11,14 +11,20 @@ export class ConversationItemDto {
   @ApiProperty()
   userId: string;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   title?: string;
 
   @ApiProperty()
-  mode: string;
+  createdAt: Date;
 
   @ApiProperty()
-  createdAt: Date;
+  updatedAt: Date;
+
+  @ApiPropertyOptional({ description: 'Paper title' })
+  paperTitle?: string;
+
+  @ApiPropertyOptional({ description: 'RAG file_id for the paper' })
+  ragFileId?: string;
 }
 
 export class CreateConversationResponseDto extends BaseResponseDto<ConversationItemDto> {

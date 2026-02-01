@@ -1,17 +1,22 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, IsNumber } from 'class-validator';
 
 export class CreatePaperRequestDto {
-  @ApiProperty({ required: false })
-  @IsOptional()
+  @ApiProperty({ description: 'Original filename' })
   @IsString()
-  title?: string;
+  fileName: string;
 
-  @ApiProperty({ description: 'S3 key của PDF' })
-  @IsString()
-  filePath: string;
-
-  @ApiProperty({ description: 'CloudFront URL để FE load PDF' })
+  @ApiProperty({ description: 'S3/Cloud URL of the PDF' })
   @IsString()
   fileUrl: string;
+
+  @ApiPropertyOptional({ description: 'File size in bytes' })
+  @IsOptional()
+  @IsNumber()
+  fileSize?: number;
+
+  @ApiPropertyOptional({ description: 'MD5 hash for deduplication' })
+  @IsOptional()
+  @IsString()
+  fileHash?: string;
 }

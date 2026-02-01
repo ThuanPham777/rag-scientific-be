@@ -1,15 +1,47 @@
-import { Body, Controller, Post, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Post,
+  HttpCode,
+  HttpStatus,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { SignupResponseDto } from './dto/signup-response.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { GoogleAuthDto } from './dto/google-auth.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  private getDeviceInfo(req: Request): string {
+    return req.headers['user-agent'] ?? 'unknown';
+  }
+
+  private getIpAddress(req: Request): string {
+    return (
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0] ??
+      req.socket.remoteAddress ??
+      'unknown'
+    );
+  }
 
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
@@ -23,14 +55,8 @@ export class AuthController {
     description: 'User successfully registered',
     type: SignupResponseDto,
   })
-  @ApiResponse({
-    status: 409,
-    description: 'Email already in use',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid input data',
-  })
+  @ApiResponse({ status: 409, description: 'Email already in use' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
   async signUp(@Body() dto: SignupRequestDto): Promise<SignupResponseDto> {
     return this.authService.signUp(dto);
   }
@@ -47,11 +73,88 @@ export class AuthController {
     description: 'User successfully logged in',
     type: LoginResponseDto,
   })
-  @ApiResponse({
-    status: 401,
-    description: 'Invalid credentials',
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  async login(
+    @Body() dto: LoginRequestDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    return this.authService.login(
+      dto,
+      this.getDeviceInfo(req),
+      this.getIpAddress(req),
+    );
+  }
+
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Google OAuth login',
+    description: 'Authenticate user with Google ID token',
   })
-  async login(@Body() dto: LoginRequestDto): Promise<LoginResponseDto> {
-    return this.authService.login(dto);
+  @ApiBody({ type: GoogleAuthDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Google login successful',
+    type: LoginResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid Google token' })
+  async googleAuth(
+    @Body() dto: GoogleAuthDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    return this.authService.googleAuth(
+      dto,
+      this.getDeviceInfo(req),
+      this.getIpAddress(req),
+    );
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh access token',
+    description: 'Get new access token using refresh token',
+  })
+  @ApiBody({ type: RefreshTokenDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Tokens refreshed successfully',
+    type: LoginResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    return this.authService.refreshTokens(
+      dto,
+      this.getDeviceInfo(req),
+      this.getIpAddress(req),
+    );
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout',
+    description: 'Revoke the refresh token',
+  })
+  @ApiBody({ type: LogoutDto })
+  @ApiResponse({ status: 200, description: 'Logged out successfully' })
+  async logout(@Body() dto: LogoutDto) {
+    return this.authService.logout(dto.refreshToken);
+  }
+
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Logout from all devices',
+    description: 'Revoke all refresh tokens for the user',
+  })
+  @ApiResponse({ status: 200, description: 'Logged out from all devices' })
+  async logoutAll(@CurrentUser() user: any) {
+    return this.authService.logoutAll(user.sub);
   }
 }

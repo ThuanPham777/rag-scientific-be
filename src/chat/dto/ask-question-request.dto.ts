@@ -1,26 +1,19 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsString, IsUUID } from 'class-validator';
-
-export enum ChatMode {
-  novice = 'novice',
-  researcher = 'researcher',
-  reviewer = 'reviewer',
-}
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class AskQuestionRequestDto {
-  @ApiProperty()
-  @IsUUID()
-  paperId: string;
-
-  @ApiProperty()
+  @ApiProperty({ description: 'Conversation ID' })
   @IsUUID()
   conversationId: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'User question' })
   @IsString()
   question: string;
 
-  @ApiProperty({ enum: ChatMode })
-  @IsEnum(ChatMode)
-  mode: ChatMode;
+  @ApiPropertyOptional({
+    description: 'Optional image URL for visual questions',
+  })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

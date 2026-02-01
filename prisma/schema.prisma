@@ -1,3 +1,9 @@
+// ============================================================================
+// SIMPLIFIED DATABASE SCHEMA FOR RAG SCIENTIFIC
+// Designed to work directly with RAG_BE_02
+// Database: PostgreSQL with Prisma
+// ============================================================================
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,247 +13,244 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model answer_citation {
-  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  qa_turn_id        String?        @db.Uuid
-  chunk_id          String?        @db.Uuid
-  element_id        String?        @db.Uuid
-  page_number       Int?
-  source_snippet    String?
-  answer_span_start Int?
-  answer_span_end   Int?
-  relevance_score   Float?
-  is_primary        Boolean?
-  created_at        DateTime?      @default(now()) @db.Timestamp(6)
-  chunk             chunk?         @relation(fields: [chunk_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_element     paper_element? @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  qa_turn           qa_turn?       @relation(fields: [qa_turn_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+// ============================================================================
+// SECTION 1: USER MANAGEMENT (with OAuth Support)
+// ============================================================================
+
+enum AuthProvider {
+  LOCAL   // Email/password registration
+  GOOGLE  // Google OAuth
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model app_user {
-  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email            String             @unique
-  password_hash    String
-  display_name     String?
-  role             String?            @default("user")
-  avatar_url       String?
-  is_active        Boolean?           @default(true)
-  last_login_at    DateTime?          @db.Timestamp(6)
-  created_at       DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
-  conversation     conversation[]
-  paper            paper[]
-  selection_region selection_region[]
+/// User account - supports both local and OAuth authentication
+model User {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String       @unique @db.VarChar(255)
+
+  // === Local Auth (nullable for OAuth users) ===
+  passwordHash  String?      @map("password_hash") @db.VarChar(255)
+
+  // === OAuth Support ===
+  provider      AuthProvider @default(LOCAL)
+  providerId    String?      @map("provider_id") @db.VarChar(255)  // Google sub/id
+
+  // === Profile ===
+  displayName   String?      @map("display_name") @db.VarChar(100)
+  avatarUrl     String?      @map("avatar_url") @db.VarChar(500)
+
+  // === Status ===
+  isActive      Boolean      @default(true) @map("is_active")
+  lastLoginAt   DateTime?    @map("last_login_at") @db.Timestamptz
+
+  // === Timestamps ===
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  papers        Paper[]
+  conversations Conversation[]
+  refreshTokens RefreshToken[]
+
+  @@unique([provider, providerId]) // Ensure unique OAuth accounts
+  @@index([email])
+  @@map("users")
 }
 
-model chunk {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paper_id        String?           @db.Uuid
-  section_id      String?           @db.Uuid
-  page_start      Int?
-  page_end        Int?
-  content         String?
-  token_count     Int?
-  chunk_index     Int?
-  embedding       String?
-  external_vec_id String?
-  splitter_name   String?
-  splitter_params Json?
-  created_at      DateTime?         @default(now()) @db.Timestamp(6)
-  answer_citation answer_citation[]
-  paper           paper?            @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_section   paper_section?    @relation(fields: [section_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  chunk_element   chunk_element[]
+// ============================================================================
+// SECTION 1.5: REFRESH TOKEN (JWT Auth)
+// ============================================================================
+
+/// Refresh token for JWT authentication
+model RefreshToken {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+
+  token       String   @unique @db.VarChar(500)              // Hashed refresh token
+  deviceInfo  String?  @map("device_info") @db.VarChar(500)  // Browser/device info
+  ipAddress   String?  @map("ip_address") @db.VarChar(50)    // IP address
+
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz    // Token expiration
+  isRevoked   Boolean  @default(false) @map("is_revoked")    // Manual revoke
+
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
-model chunk_element {
-  chunk_id      String        @db.Uuid
-  element_id    String        @db.Uuid
-  position      Int?
-  chunk         chunk         @relation(fields: [chunk_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_element paper_element @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+// ============================================================================
+// SECTION 2: PAPER MANAGEMENT
+// Maps directly to RAG_BE_02's file_id concept
+// ============================================================================
 
-  @@id([chunk_id, element_id])
+/// Paper/PDF document - core entity linking to RAG service
+model Paper {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+
+  // === File Storage (Cloud) ===
+  fileName        String      @map("file_name") @db.VarChar(255)      // Original filename
+  fileUrl         String      @map("file_url") @db.VarChar(1000)      // S3/Cloud URL
+  fileSize        BigInt?     @map("file_size")                        // File size in bytes
+  fileHash        String?     @map("file_hash") @db.VarChar(64)       // MD5 hash for dedup
+
+  // === RAG Service Integration ===
+  // This is the key field - maps to file_id in RAG_BE_02
+  ragFileId       String      @unique @map("rag_file_id") @db.VarChar(100)
+
+  // === Metadata from RAG ingestion ===
+  title           String?     @db.VarChar(500)                        // From GROBID
+  abstract        String?     @db.Text                                // From GROBID
+  authors         String?     @db.Text                                // JSON array string
+  numPages        Int?        @map("num_pages")
+
+  // === Processing Status ===
+  // Maps to processing_status in RAG_BE_02
+  status          PaperStatus @default(PENDING)
+  errorMessage    String?     @map("error_message") @db.Text
+
+  // === Ingestion Stats (from IngestionResult) ===
+  nodeCount       Int?        @map("node_count")
+  tableCount      Int?        @map("table_count")
+  imageCount      Int?        @map("image_count")
+
+  // === Timestamps ===
+  processedAt     DateTime?   @map("processed_at") @db.Timestamptz   // When RAG finished
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations   Conversation[]
+  suggestedQuestions SuggestedQuestion[]
+  relatedPapers   RelatedPaper[]
+
+  @@index([userId])
+  @@index([ragFileId])
+  @@index([status])
+  @@map("papers")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model conversation {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id     String?   @db.Uuid
-  paper_id    String?   @db.Uuid
-  title       String?
-  mode        String?   @default("novice")
-  description String?
-  created_at  DateTime? @default(now()) @db.Timestamp(6)
-  updated_at  DateTime? @default(now()) @db.Timestamp(6)
-  paper       paper?    @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  app_user    app_user? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  message     message[]
-  qa_turn     qa_turn[]
+enum PaperStatus {
+  PENDING     // Uploaded, waiting for RAG
+  PROCESSING  // RAG is processing
+  COMPLETED   // RAG finished successfully
+  FAILED      // RAG failed
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model formula_insight {
-  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  selection_region_id    String?           @db.Uuid
-  qa_turn_id             String?           @db.Uuid
-  audience_level         String?
-  variables_json         Json?
-  conceptual_explanation String?
-  pipeline_role          String?
-  assumptions            String?
-  limitations            String?
-  model_name             String?
-  created_at             DateTime?         @default(now()) @db.Timestamp(6)
-  qa_turn                qa_turn?          @relation(fields: [qa_turn_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  selection_region       selection_region? @relation(fields: [selection_region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+// ============================================================================
+// SECTION 3: CONVERSATION & CHAT HISTORY
+// ============================================================================
+
+/// Conversation - chat session with a paper
+model Conversation {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  paperId       String   @map("paper_id") @db.Uuid
+
+  title         String?  @db.VarChar(300)                           // Auto-generated or user-set
+
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  messages      Message[]
+
+  @@index([userId])
+  @@index([paperId])
+  @@index([createdAt])
+  @@map("conversations")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model message {
-  id                                            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  conversation_id                               String?       @db.Uuid
-  role                                          String?
-  content                                       String?
-  token_count                                   Int?
-  model_name                                    String?
-  created_at                                    DateTime?     @default(now()) @db.Timestamp(6)
-  conversation                                  conversation? @relation(fields: [conversation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  qa_turn_qa_turn_assistant_message_idTomessage qa_turn[]     @relation("qa_turn_assistant_message_idTomessage")
-  qa_turn_qa_turn_user_message_idTomessage      qa_turn[]     @relation("qa_turn_user_message_idTomessage")
+/// Message - individual chat message (user question or AI answer)
+model Message {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String      @map("conversation_id") @db.Uuid
+
+  role            MessageRole                                       // USER or ASSISTANT
+  content         String      @db.Text                              // Question or Answer
+
+  // === For USER messages with image (explain region feature) ===
+  imageUrl        String?     @map("image_url") @db.VarChar(1000)   // S3 URL of cropped region image
+
+  // === For ASSISTANT messages - RAG response metadata ===
+  modelName       String?     @map("model_name") @db.VarChar(100)   // Model used for generation
+  tokenCount      Int?        @map("token_count")                    // Token count for response
+  context         Json?       @default("{}") @db.JsonB              // Retrieved context from RAG (texts, tables, images)
+
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model paper {
-  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  owner_user_id    String?            @db.Uuid
-  title            String?
-  abstract         String?
-  authors          String?
-  publication_year Int?
-  venue            String?
-  source           String?
-  doi              String?
-  arxiv_id         String?
-  url              String?
-  num_pages        Int?
-  status           String?            @default("processing")
-  domain_tag       String?
-  language         String?
-  file_path        String?
-  meta_json        Json?
-  created_at       DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
-  chunk            chunk[]
-  conversation     conversation[]
-  app_user         app_user?          @relation(fields: [owner_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_element    paper_element[]
-  paper_page       paper_page[]
-  paper_section    paper_section[]
-  selection_region selection_region[]
+enum MessageRole {
+  USER
+  ASSISTANT
 }
 
-model paper_element {
-  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paper_id         String?            @db.Uuid
-  page_id          String?            @db.Uuid
-  section_id       String?            @db.Uuid
-  element_type     String?
-  label            String?
-  order_in_page    Int?
-  bbox_x           Float?
-  bbox_y           Float?
-  bbox_width       Float?
-  bbox_height      Float?
-  raw_text         String?
-  normalized_text  String?
-  confidence       Float?
-  extra_json       Json?
-  created_at       DateTime?          @default(now()) @db.Timestamp(6)
-  answer_citation  answer_citation[]
-  chunk_element    chunk_element[]
-  paper_page       paper_page?        @relation(fields: [page_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper            paper?             @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_section    paper_section?     @relation(fields: [section_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  selection_region selection_region[]
+// ============================================================================
+// SECTION 4: SUGGESTED QUESTIONS (Brainstorm feature)
+// ============================================================================
+
+/// Cached suggested questions for a paper
+model SuggestedQuestion {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId       String   @map("paper_id") @db.Uuid
+
+  question      String   @db.Text
+  orderIndex    Int      @map("order_index")
+
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@index([paperId])
+  @@map("suggested_questions")
 }
 
-model paper_page {
-  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paper_id         String?            @db.Uuid
-  page_number      Int
-  text             String?
-  image_path       String?
-  width            Int?
-  height           Int?
-  meta_json        Json?
-  created_at       DateTime?          @default(now()) @db.Timestamp(6)
-  paper_element    paper_element[]
-  paper            paper?             @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  selection_region selection_region[]
-}
+// ============================================================================
+// SECTION 5: RELATED PAPERS CACHE
+// Cache results from RAG /related-papers endpoint
+// ============================================================================
 
-model paper_section {
-  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paper_id      String?         @db.Uuid
-  section_type  String?
-  heading       String?
-  level         Int?
-  order_index   Int?
-  start_page    Int?
-  end_page      Int?
-  content       String?
-  meta_json     Json?
-  created_at    DateTime?       @default(now()) @db.Timestamp(6)
-  chunk         chunk[]
-  paper_element paper_element[]
-  paper         paper?          @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
+/// Cached related paper from arXiv (via RAG service)
+model RelatedPaper {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId       String   @map("paper_id") @db.Uuid          // Source paper
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model qa_turn {
-  id                                            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  conversation_id                               String?           @db.Uuid
-  user_message_id                               String?           @db.Uuid
-  assistant_message_id                          String?           @db.Uuid
-  mode_snapshot                                 String?
-  retriever_config_json                         Json?
-  generator_config_json                         Json?
-  system_prompt_snapshot                        String?
-  latency_ms                                    Int?
-  token_input                                   Int?
-  token_output                                  Int?
-  cost_usd                                      Decimal?          @db.Decimal
-  created_at                                    DateTime?         @default(now()) @db.Timestamp(6)
-  answer_citation                               answer_citation[]
-  formula_insight                               formula_insight[]
-  message_qa_turn_assistant_message_idTomessage message?          @relation("qa_turn_assistant_message_idTomessage", fields: [assistant_message_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  conversation                                  conversation?     @relation(fields: [conversation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  message_qa_turn_user_message_idTomessage      message?          @relation("qa_turn_user_message_idTomessage", fields: [user_message_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
+  // === arXiv Paper Info ===
+  arxivId       String   @map("arxiv_id") @db.VarChar(50)
+  title         String   @db.VarChar(500)
+  abstract      String   @db.Text
+  authors       String[] @db.VarChar(255)                    // Array of author names
+  categories    String[] @db.VarChar(50)                     // arXiv categories
+  url           String   @db.VarChar(500)
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model selection_region {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paper_id        String?           @db.Uuid
-  page_id         String?           @db.Uuid
-  element_id      String?           @db.Uuid
-  selection_type  String?           @default("auto")
-  bbox_x          Float?
-  bbox_y          Float?
-  bbox_width      Float?
-  bbox_height     Float?
-  image_path      String?
-  extracted_text  String?
-  latex           String?
-  created_by_user String?           @db.Uuid
-  created_source  String?
-  meta_json       Json?
-  created_at      DateTime?         @default(now()) @db.Timestamp(6)
-  formula_insight formula_insight[]
-  app_user        app_user?         @relation(fields: [created_by_user], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_element   paper_element?    @relation(fields: [element_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper_page      paper_page?       @relation(fields: [page_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  paper           paper?            @relation(fields: [paper_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  // === Relevance ===
+  score         Float                                        // Similarity score (0-1)
+  reason        String   @db.Text                            // Why it's relevant
+
+  // === Cache Control ===
+  orderIndex    Int      @map("order_index")                 // Display order
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, arxivId])  // One entry per related paper per source
+  @@index([paperId])
+  @@map("related_papers")
 }

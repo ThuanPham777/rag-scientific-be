@@ -1,38 +1,46 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
 export class ChatCitationDto {
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   pageNumber?: number;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   snippet?: string;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   elementId?: string;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   chunkId?: string;
 
-  @ApiProperty({ required: false })
+  @ApiPropertyOptional()
   score?: number;
 }
 
 export class AskQuestionResultDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'AI-generated answer' })
   answer: string;
 
-  @ApiProperty({ type: [ChatCitationDto] })
+  @ApiProperty({ type: [ChatCitationDto], description: 'Source citations' })
   citations: ChatCitationDto[];
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Assistant message ID' })
   assistantMessageId: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'User message ID' })
   userMessageId: string;
 
-  @ApiProperty()
-  qaTurnId: string;
+  @ApiPropertyOptional({
+    description: 'Conversation ID (returned when new conversation created)',
+  })
+  conversationId?: string;
+
+  @ApiPropertyOptional({ description: 'Model name used for generation' })
+  modelName?: string;
+
+  @ApiPropertyOptional({ description: 'Token count for the response' })
+  tokenCount?: number;
 }
 
 export class AskQuestionResponseDto extends BaseResponseDto<AskQuestionResultDto> {

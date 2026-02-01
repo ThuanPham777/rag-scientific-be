@@ -1,21 +1,45 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BaseResponseDto } from '../../common/dto/base-response.dto';
 
 export class PaperItemDto {
   @ApiProperty()
   id: string;
 
-  @ApiProperty({ required: false })
+  @ApiProperty({ description: 'RAG file_id for querying' })
+  ragFileId: string;
+
+  @ApiProperty()
+  fileName: string;
+
+  @ApiProperty()
+  fileUrl: string;
+
+  @ApiPropertyOptional()
+  fileSize?: number;
+
+  @ApiPropertyOptional()
   title?: string;
 
-  @ApiProperty({ required: false })
-  url?: string;
+  @ApiPropertyOptional()
+  abstract?: string;
 
-  @ApiProperty({ required: false })
-  status?: string;
+  @ApiProperty({ enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
+  status: string;
+
+  @ApiPropertyOptional()
+  nodeCount?: number;
+
+  @ApiPropertyOptional()
+  tableCount?: number;
+
+  @ApiPropertyOptional()
+  imageCount?: number;
 
   @ApiProperty()
   createdAt: Date;
+
+  @ApiPropertyOptional()
+  processedAt?: Date;
 }
 
 export class CreatePaperResponseDto extends BaseResponseDto<PaperItemDto> {

@@ -7,7 +7,6 @@ import { UploadModule } from './upload/upload.module';
 import { PaperModule } from './paper/paper.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { ChatModule } from './chat/chat.module';
-import { SelectionModule } from './selection-region/selection.module';
 
 @Module({
   imports: [
@@ -19,7 +18,6 @@ import { SelectionModule } from './selection-region/selection.module';
     PaperModule,
     ConversationModule,
     ChatModule,
-    SelectionModule,
   ],
 })
 export class AppModule {}
