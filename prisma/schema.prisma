@@ -50,6 +50,7 @@ model User {
   papers        Paper[]
   conversations Conversation[]
   refreshTokens RefreshToken[]
+  folders       Folder[]
 
   @@unique([provider, providerId]) // Ensure unique OAuth accounts
   @@index([email])
@@ -84,7 +85,35 @@ model RefreshToken {
 }
 
 // ============================================================================
-// SECTION 2: PAPER MANAGEMENT
+// SECTION 2: FOLDER MANAGEMENT (My Library)
+// ============================================================================
+
+/// Folder - organize papers in user's library
+model Folder {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+
+  name        String   @db.VarChar(100)                         // Folder name
+
+  // === Ordering ===
+  orderIndex  Int      @default(0) @map("order_index")          // For custom ordering
+
+  // === Timestamps ===
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  papers      Paper[]
+
+  @@unique([userId, name])  // Unique folder name per user
+  @@index([userId])
+  @@index([orderIndex])
+  @@map("folders")
+}
+
+// ============================================================================
+// SECTION 3: PAPER MANAGEMENT
 // Maps directly to RAG_BE_02's file_id concept
 // ============================================================================
 
@@ -92,6 +121,7 @@ model RefreshToken {
 model Paper {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String      @map("user_id") @db.Uuid
+  folderId        String?     @map("folder_id") @db.Uuid              // Optional folder
 
   // === File Storage (Cloud) ===
   fileName        String      @map("file_name") @db.VarChar(255)      // Original filename
@@ -126,11 +156,13 @@ model Paper {
 
   // Relations
   user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder          Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
   conversations   Conversation[]
   suggestedQuestions SuggestedQuestion[]
   relatedPapers   RelatedPaper[]
 
   @@index([userId])
+  @@index([folderId])
   @@index([ragFileId])
   @@index([status])
   @@map("papers")

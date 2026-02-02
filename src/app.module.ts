@@ -7,6 +7,7 @@ import { UploadModule } from './upload/upload.module';
 import { PaperModule } from './paper/paper.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { ChatModule } from './chat/chat.module';
+import { FolderModule } from './folder/folder.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ChatModule } from './chat/chat.module';
     PaperModule,
     ConversationModule,
     ChatModule,
+    FolderModule,
   ],
 })
 export class AppModule {}

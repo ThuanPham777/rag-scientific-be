@@ -50,6 +50,7 @@ export class PaperService {
         fileHash: dto.fileHash,
         ragFileId,
         status: 'PENDING',
+        folderId: dto.folderId || null,
       },
     });
 

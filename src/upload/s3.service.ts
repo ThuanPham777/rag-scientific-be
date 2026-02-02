@@ -1,6 +1,11 @@
 // src/upload/s3.service.ts
-import { Injectable } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
@@ -10,6 +15,7 @@ export class S3Service {
   private readonly s3: S3Client;
   private readonly bucket: string;
   private readonly region: string;
+  private readonly logger = new Logger(S3Service.name);
 
   constructor(private readonly config: ConfigService) {
     this.region = this.config.get<string>('AWS_REGION') || 'ap-southeast-1';
@@ -89,5 +95,75 @@ export class S3Service {
     await this.s3.send(command);
 
     return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+  }
+
+  /**
+   * Extract S3 key from full URL
+   */
+  extractKeyFromUrl(url: string): string | null {
+    try {
+      const urlObj = new URL(url);
+      // Remove leading slash
+      return urlObj.pathname.substring(1);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Delete a single file from S3
+   */
+  async deleteFile(url: string): Promise<boolean> {
+    const key = this.extractKeyFromUrl(url);
+    if (!key) {
+      this.logger.warn(`Invalid S3 URL: ${url}`);
+      return false;
+    }
+
+    try {
+      const command = new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+      await this.s3.send(command);
+      this.logger.log(`Deleted S3 file: ${key}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to delete S3 file ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete multiple files from S3
+   */
+  async deleteFiles(
+    urls: string[],
+  ): Promise<{ deleted: number; failed: number }> {
+    const keys = urls
+      .map((url) => this.extractKeyFromUrl(url))
+      .filter((key): key is string => key !== null);
+
+    if (keys.length === 0) {
+      return { deleted: 0, failed: urls.length };
+    }
+
+    try {
+      const command = new DeleteObjectsCommand({
+        Bucket: this.bucket,
+        Delete: {
+          Objects: keys.map((Key) => ({ Key })),
+          Quiet: false,
+        },
+      });
+      const result = await this.s3.send(command);
+      const deleted = result.Deleted?.length || 0;
+      const failed = result.Errors?.length || 0;
+      this.logger.log(`Deleted ${deleted} S3 files, ${failed} failed`);
+      return { deleted, failed };
+    } catch (error) {
+      this.logger.error('Failed to delete S3 files:', error);
+      return { deleted: 0, failed: keys.length };
+    }
   }
 }
