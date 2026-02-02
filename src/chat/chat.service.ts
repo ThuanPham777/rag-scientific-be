@@ -252,14 +252,37 @@ export class ChatService {
         imageUrl: true,
         modelName: true,
         tokenCount: true,
+        context: true, // Include context to get citations
         createdAt: true,
       },
+    });
+
+    // Map messages and extract citations from context for assistant messages
+    const mappedMessages = messages.map((msg) => {
+      const base: any = {
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        imageUrl: msg.imageUrl,
+        modelName: msg.modelName,
+        tokenCount: msg.tokenCount,
+        createdAt: msg.createdAt,
+      };
+
+      // Extract citations from context for assistant messages
+      if (msg.role === 'ASSISTANT' && msg.context) {
+        const context = msg.context as any;
+        const rawCitations = this.extractCitationsFromContext(context);
+        base.citations = rawCitations.map((c: any) => this.mapCitation(c));
+      }
+
+      return base;
     });
 
     return {
       success: true,
       message: 'Messages retrieved',
-      data: messages,
+      data: mappedMessages,
     };
   }
 
