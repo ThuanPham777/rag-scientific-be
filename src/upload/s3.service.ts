@@ -58,4 +58,36 @@ export class S3Service {
       region: this.region,
     };
   }
+
+  /**
+   * Upload base64 image to S3
+   * @param base64Data - Base64 encoded image data (without data URL prefix)
+   * @param folder - Folder in S3 bucket
+   * @param mimeType - MIME type (default: image/png)
+   * @returns S3 URL
+   */
+  async uploadBase64Image(
+    base64Data: string,
+    folder: string = 'chat-images',
+    mimeType: string = 'image/png',
+  ): Promise<string> {
+    // Remove data URL prefix if present
+    const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Clean, 'base64');
+
+    const ext = mimeType === 'image/jpeg' ? '.jpg' : '.png';
+    const cleanFolder = folder.replace(/\/?$/, '/');
+    const key = `${cleanFolder}${randomUUID()}${ext}`;
+
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: mimeType,
+    });
+
+    await this.s3.send(command);
+
+    return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+  }
 }

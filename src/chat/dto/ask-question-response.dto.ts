@@ -2,20 +2,35 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 
 export class ChatCitationDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Page number in PDF' })
   pageNumber?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Text snippet from source' })
   snippet?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Element ID' })
   elementId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Chunk ID' })
   chunkId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Relevance score' })
   score?: number;
+
+  @ApiPropertyOptional({ description: 'Source ID (e.g., S1, S2)' })
+  sourceId?: string;
+
+  @ApiPropertyOptional({ description: 'Section title' })
+  sectionTitle?: string;
+
+  @ApiPropertyOptional({ description: 'Bounding box coordinates' })
+  bbox?: any;
+
+  @ApiPropertyOptional({ description: 'Layout width' })
+  layoutWidth?: number;
+
+  @ApiPropertyOptional({ description: 'Layout height' })
+  layoutHeight?: number;
 }
 
 export class AskQuestionResultDto {
