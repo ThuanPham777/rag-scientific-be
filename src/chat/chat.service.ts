@@ -373,6 +373,12 @@ export class ChatService {
       },
     });
 
+    // Strip data URL prefix if present (RAG API expects raw base64)
+    let rawBase64 = dto.imageBase64;
+    if (dto.imageBase64.includes(',')) {
+      rawBase64 = dto.imageBase64.split(',')[1];
+    }
+
     // Call RAG explain-region endpoint
     let ragResponse: RagQueryResponse;
     try {
@@ -380,7 +386,7 @@ export class ChatService {
         `${this.ragServiceUrl}/explain-region`,
         {
           file_id: conversation.paper.ragFileId,
-          image_b64: dto.imageBase64,
+          image_b64: rawBase64,
           page_number: dto.pageNumber,
           question:
             dto.question || 'Please analyze and explain this cropped region.',

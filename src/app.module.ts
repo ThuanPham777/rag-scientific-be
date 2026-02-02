@@ -8,6 +8,7 @@ import { PaperModule } from './paper/paper.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { ChatModule } from './chat/chat.module';
 import { FolderModule } from './folder/folder.module';
+import { GuestModule } from './guest/guest.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { FolderModule } from './folder/folder.module';
     ConversationModule,
     ChatModule,
     FolderModule,
+    GuestModule,
   ],
 })
 export class AppModule {}
