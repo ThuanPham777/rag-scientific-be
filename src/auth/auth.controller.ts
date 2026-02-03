@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -14,7 +15,7 @@ import {
   ApiBody,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
@@ -23,6 +24,7 @@ import { SignupResponseDto } from './dto/signup-response.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { GoogleAuthDto } from './dto/google-auth.dto';
+import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
 
@@ -103,6 +105,31 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<LoginResponseDto> {
     return this.authService.googleAuth(
+      dto,
+      this.getDeviceInfo(req),
+      this.getIpAddress(req),
+    );
+  }
+
+  @Post('google/code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Google OAuth login with Authorization Code',
+    description:
+      'Authenticate user with Google Authorization Code flow (more secure)',
+  })
+  @ApiBody({ type: GoogleCodeAuthDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Google login successful',
+    type: LoginResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid authorization code' })
+  async googleCodeAuth(
+    @Body() dto: GoogleCodeAuthDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    return this.authService.googleCodeAuth(
       dto,
       this.getDeviceInfo(req),
       this.getIpAddress(req),

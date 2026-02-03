@@ -15,6 +15,7 @@ import { SignupResponseDto } from './dto/signup-response.dto';
 import { OAuth2Client } from 'google-auth-library';
 import { createHash } from 'crypto';
 import { GoogleAuthDto } from './dto/google-auth.dto';
+import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Injectable()
@@ -28,8 +29,13 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {
     const googleClientId = this.config.get<string>('GOOGLE_CLIENT_ID');
+    const googleClientSecret = this.config.get<string>('GOOGLE_CLIENT_SECRET');
     if (googleClientId) {
-      this.googleClient = new OAuth2Client(googleClientId);
+      this.googleClient = new OAuth2Client(
+        googleClientId,
+        googleClientSecret,
+        // redirect_uri will be provided per request for flexibility
+      );
     }
   }
 
@@ -220,6 +226,107 @@ export class AuthService {
     response.success = true;
     response.message = 'Google login successful';
     return response;
+  }
+
+  // ========================
+  // GOOGLE OAUTH - AUTHORIZATION CODE FLOW
+  // More secure than ID token flow
+  // ========================
+  async googleCodeAuth(
+    dto: GoogleCodeAuthDto,
+    deviceInfo?: string,
+    ipAddress?: string,
+  ): Promise<LoginResponseDto> {
+    if (!this.googleClient) {
+      throw new BadRequestException('Google OAuth is not configured');
+    }
+
+    const clientSecret = this.config.get<string>('GOOGLE_CLIENT_SECRET');
+    if (!clientSecret) {
+      throw new BadRequestException(
+        'Google OAuth client secret is not configured',
+      );
+    }
+
+    try {
+      // Exchange authorization code for tokens
+      const { tokens: googleTokens } = await this.googleClient.getToken({
+        code: dto.code,
+        redirect_uri: dto.redirectUri,
+        // PKCE support
+        codeVerifier: dto.codeVerifier,
+      });
+
+      if (!googleTokens.id_token) {
+        throw new UnauthorizedException('Failed to get ID token from Google');
+      }
+
+      // Verify the ID token
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: googleTokens.id_token,
+        audience: this.config.get<string>('GOOGLE_CLIENT_ID'),
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        throw new UnauthorizedException('Invalid Google token payload');
+      }
+
+      const { sub: googleId, email, name, picture } = payload;
+
+      // Check if user exists with this Google account
+      let user = await this.usersService.findByProviderId('GOOGLE', googleId);
+
+      if (!user) {
+        // Check if email already used by LOCAL account
+        const existingUser = await this.usersService.findByEmail(email);
+        if (existingUser && existingUser.provider === 'LOCAL') {
+          throw new BadRequestException(
+            'Email already registered with password. Please login with your password.',
+          );
+        }
+
+        // Create new Google user
+        user = await this.usersService.createOAuthUser({
+          email,
+          provider: 'GOOGLE',
+          providerId: googleId,
+          displayName: name,
+          avatarUrl: picture,
+        });
+      }
+
+      // Update last login
+      await this.usersService.updateLastLogin(user.id);
+
+      // Issue our own JWT tokens
+      const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
+
+      const response = new LoginResponseDto();
+      response.data = {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        provider: user.provider,
+      };
+      response.accessToken = tokens.accessToken;
+      response.refreshToken = tokens.refreshToken;
+      response.success = true;
+      response.message = 'Google login successful';
+      return response;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+      console.error('Google OAuth error:', error);
+      throw new UnauthorizedException(
+        'Failed to authenticate with Google. Please try again.',
+      );
+    }
   }
 
   // ========================
