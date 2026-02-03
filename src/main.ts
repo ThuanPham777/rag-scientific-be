@@ -66,12 +66,15 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document, {
+  SwaggerModule.setup('docs', app, document, {
     swaggerOptions: {
       persistAuthorization: true,
     },
   });
 
-  await app.listen(3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`🚀 Application running on: http://localhost:${port}`);
+  console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
 }
 bootstrap();

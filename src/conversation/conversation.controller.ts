@@ -21,7 +21,13 @@ import { ConversationService } from './conversation.service';
 import { CreateConversationRequestDto } from './dto/create-conversation-request.dto';
 import { CreateConversationResponseDto } from './dto/create-conversation-response.dto';
 import { ListConversationsResponseDto } from './dto/list-conversations-response.dto';
+import { GetConversationResponseDto } from './dto/get-conversation-response.dto';
+import { DeleteConversationResponseDto } from './dto/delete-conversation-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import {
+  ApiResponseDto,
+  EmptyResponseDto,
+} from '../common/dto/api-response.dto';
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
@@ -33,11 +39,18 @@ export class ConversationController {
   @Post()
   @ApiOperation({ summary: 'Create a new conversation for a paper' })
   @ApiOkResponse({ type: CreateConversationResponseDto })
-  create(
+  async create(
     @CurrentUser() user: any,
     @Body() dto: CreateConversationRequestDto,
   ): Promise<CreateConversationResponseDto> {
-    return this.conversationService.createConversation(user.id, dto);
+    const data = await this.conversationService.createConversation(
+      user.id,
+      dto,
+    );
+    return ApiResponseDto.success(
+      data,
+      'Conversation created',
+    ) as CreateConversationResponseDto;
   }
 
   @Get()
@@ -54,29 +67,51 @@ export class ConversationController {
     enum: ['SINGLE_PAPER', 'MULTI_PAPER'],
     description: 'Filter by conversation type',
   })
-  list(
+  async list(
     @CurrentUser() user: any,
     @Query('paperId') paperId?: string,
     @Query('type') type?: 'SINGLE_PAPER' | 'MULTI_PAPER',
   ): Promise<ListConversationsResponseDto> {
-    return this.conversationService.listConversations(
+    const data = await this.conversationService.listConversations(
       user.id,
       paperId,
       type as any,
     );
+    return ApiResponseDto.success(
+      data,
+      'List of conversations',
+    ) as ListConversationsResponseDto;
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get conversation by ID' })
   @ApiParam({ name: 'id', description: 'Conversation ID' })
-  getById(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.conversationService.getConversationById(user.id, id);
+  @ApiOkResponse({ type: GetConversationResponseDto })
+  async getById(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ): Promise<GetConversationResponseDto> {
+    const data = await this.conversationService.getConversationById(
+      user.id,
+      id,
+    );
+    return ApiResponseDto.success(
+      data,
+      'Conversation found',
+    ) as GetConversationResponseDto;
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a conversation' })
   @ApiParam({ name: 'id', description: 'Conversation ID' })
-  delete(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.conversationService.deleteConversation(user.id, id);
+  @ApiOkResponse({ type: DeleteConversationResponseDto })
+  async delete(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ): Promise<DeleteConversationResponseDto> {
+    await this.conversationService.deleteConversation(user.id, id);
+    return EmptyResponseDto.success(
+      'Conversation deleted successfully',
+    ) as DeleteConversationResponseDto;
   }
 }

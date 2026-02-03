@@ -2,12 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
-import {
-  CreatePaperResponseDto,
-  PaperItemDto,
-} from './dto/create-paper-response.dto';
-import { ListPapersResponseDto } from './dto/list-papers-response.dto';
-import { GetPaperResponseDto } from './dto/get-paper-response.dto';
+import { PaperItemDto } from './dto/create-paper-response.dto';
 
 @Injectable()
 export class PaperService {
@@ -34,10 +29,14 @@ export class PaperService {
     return dto;
   }
 
+  /**
+   * Create a new paper and trigger RAG ingestion
+   * @returns Raw paper item
+   */
   async createPaper(
     userId: string,
     dto: CreatePaperRequestDto,
-  ): Promise<CreatePaperResponseDto> {
+  ): Promise<PaperItemDto> {
     // Generate ragFileId (UUID for RAG service)
     const ragFileId = crypto.randomUUID();
 
@@ -57,11 +56,7 @@ export class PaperService {
     // Call RAG service to ingest the PDF
     this.triggerRagIngestion(paper.id, ragFileId, dto.fileUrl);
 
-    const response = new CreatePaperResponseDto();
-    response.success = true;
-    response.message = 'Paper created and processing started';
-    response.data = this.mapToPaperItem(paper);
-    return response;
+    return this.mapToPaperItem(paper);
   }
 
   private async triggerRagIngestion(
@@ -111,20 +106,24 @@ export class PaperService {
     }
   }
 
-  async listMyPapers(userId: string): Promise<ListPapersResponseDto> {
+  /**
+   * List all papers for a user
+   * @returns Raw array of papers
+   */
+  async listMyPapers(userId: string): Promise<PaperItemDto[]> {
     const papers = await this.prisma.paper.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
-    const response = new ListPapersResponseDto();
-    response.success = true;
-    response.message = 'List of papers';
-    response.data = papers.map((p) => this.mapToPaperItem(p));
-    return response;
+    return papers.map((p) => this.mapToPaperItem(p));
   }
 
-  async getPaperById(userId: string, id: string): Promise<GetPaperResponseDto> {
+  /**
+   * Get paper by ID
+   * @returns Raw paper item
+   */
+  async getPaperById(userId: string, id: string): Promise<PaperItemDto> {
     const paper = await this.prisma.paper.findFirst({
       where: { id, userId },
     });
@@ -133,17 +132,17 @@ export class PaperService {
       throw new NotFoundException('Paper not found');
     }
 
-    const response = new GetPaperResponseDto();
-    response.success = true;
-    response.message = 'Paper detail';
-    response.data = this.mapToPaperItem(paper);
-    return response;
+    return this.mapToPaperItem(paper);
   }
 
+  /**
+   * Get paper by RAG file ID
+   * @returns Raw paper item
+   */
   async getPaperByRagFileId(
     userId: string,
     ragFileId: string,
-  ): Promise<GetPaperResponseDto> {
+  ): Promise<PaperItemDto> {
     const paper = await this.prisma.paper.findFirst({
       where: { ragFileId, userId },
     });
@@ -152,14 +151,13 @@ export class PaperService {
       throw new NotFoundException('Paper not found');
     }
 
-    const response = new GetPaperResponseDto();
-    response.success = true;
-    response.message = 'Paper detail';
-    response.data = this.mapToPaperItem(paper);
-    return response;
+    return this.mapToPaperItem(paper);
   }
 
-  async deletePaper(userId: string, id: string): Promise<{ success: boolean }> {
+  /**
+   * Delete a paper
+   */
+  async deletePaper(userId: string, id: string): Promise<void> {
     const paper = await this.prisma.paper.findFirst({
       where: { id, userId },
     });
@@ -169,7 +167,5 @@ export class PaperService {
     }
 
     await this.prisma.paper.delete({ where: { id } });
-
-    return { success: true };
   }
 }

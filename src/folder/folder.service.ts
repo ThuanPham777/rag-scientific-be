@@ -9,6 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
 import { CreateFolderDto, UpdateFolderDto, MovePaperDto } from './dto';
+import {
+  FolderItemDto,
+  FolderWithPapersDto,
+  DeleteFolderResultDto,
+  MovePaperResultDto,
+} from './dto/folder-response.dto';
+import { PaperItemDto } from '../paper/dto/create-paper-response.dto';
 
 @Injectable()
 export class FolderService {
@@ -26,9 +33,10 @@ export class FolderService {
 
   /**
    * Get all folders for a user
+   * @returns Raw array of folders
    */
-  async findAllByUser(userId: string) {
-    return this.prisma.folder.findMany({
+  async findAllByUser(userId: string): Promise<FolderItemDto[]> {
+    const folders = await this.prisma.folder.findMany({
       where: { userId },
       include: {
         _count: {
@@ -37,12 +45,15 @@ export class FolderService {
       },
       orderBy: [{ orderIndex: 'asc' }, { createdAt: 'desc' }],
     });
+
+    return folders as FolderItemDto[];
   }
 
   /**
    * Get a single folder with papers
+   * @returns Raw folder with papers
    */
-  async findOne(id: string, userId: string) {
+  async findOne(id: string, userId: string): Promise<FolderWithPapersDto> {
     const folder = await this.prisma.folder.findUnique({
       where: { id },
       include: {
@@ -75,13 +86,14 @@ export class FolderService {
       throw new ForbiddenException('You do not have access to this folder');
     }
 
-    return folder;
+    return folder as unknown as FolderWithPapersDto;
   }
 
   /**
    * Create a new folder
+   * @returns Raw created folder
    */
-  async create(userId: string, dto: CreateFolderDto) {
+  async create(userId: string, dto: CreateFolderDto): Promise<FolderItemDto> {
     // Check for duplicate name
     console.log('userId', userId, 'dto.name', dto.name);
     const existing = await this.prisma.folder.findUnique({
@@ -103,7 +115,7 @@ export class FolderService {
       _max: { orderIndex: true },
     });
 
-    return this.prisma.folder.create({
+    const folder = await this.prisma.folder.create({
       data: {
         userId,
         name: dto.name,
@@ -115,12 +127,19 @@ export class FolderService {
         },
       },
     });
+
+    return folder as FolderItemDto;
   }
 
   /**
    * Update a folder
+   * @returns Raw updated folder
    */
-  async update(id: string, userId: string, dto: UpdateFolderDto) {
+  async update(
+    id: string,
+    userId: string,
+    dto: UpdateFolderDto,
+  ): Promise<FolderItemDto> {
     const folder = await this.prisma.folder.findUnique({
       where: { id },
     });
@@ -149,7 +168,7 @@ export class FolderService {
       }
     }
 
-    return this.prisma.folder.update({
+    const updatedFolder = await this.prisma.folder.update({
       where: { id },
       data: dto,
       include: {
@@ -158,6 +177,8 @@ export class FolderService {
         },
       },
     });
+
+    return updatedFolder as FolderItemDto;
   }
 
   /**
@@ -168,8 +189,9 @@ export class FolderService {
    * - All related papers cache
    * - S3 files (PDFs and chat images)
    * - RAG vectorstore data
+   * @returns Raw delete result with paper count
    */
-  async remove(id: string, userId: string) {
+  async remove(id: string, userId: string): Promise<DeleteFolderResultDto> {
     const folder = await this.prisma.folder.findUnique({
       where: { id },
       include: {
@@ -279,8 +301,13 @@ export class FolderService {
 
   /**
    * Move a paper to a folder (or remove from folder)
+   * @returns Raw updated paper data
    */
-  async movePaper(paperId: string, userId: string, dto: MovePaperDto) {
+  async movePaper(
+    paperId: string,
+    userId: string,
+    dto: MovePaperDto,
+  ): Promise<MovePaperResultDto> {
     const paper = await this.prisma.paper.findUnique({
       where: { id: paperId },
     });
@@ -308,7 +335,7 @@ export class FolderService {
       }
     }
 
-    return this.prisma.paper.update({
+    const updatedPaper = await this.prisma.paper.update({
       where: { id: paperId },
       data: { folderId: dto.folderId || null },
       select: {
@@ -319,13 +346,16 @@ export class FolderService {
         folderId: true,
       },
     });
+
+    return updatedPaper as MovePaperResultDto;
   }
 
   /**
    * Get all uncategorized papers (papers without a folder)
+   * @returns Raw array of papers
    */
-  async getUncategorizedPapers(userId: string) {
-    return this.prisma.paper.findMany({
+  async getUncategorizedPapers(userId: string): Promise<PaperItemDto[]> {
+    const papers = await this.prisma.paper.findMany({
       where: {
         userId,
         folderId: null,
@@ -344,5 +374,7 @@ export class FolderService {
         createdAt: true,
       },
     });
+
+    return papers as PaperItemDto[];
   }
 }

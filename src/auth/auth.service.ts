@@ -10,8 +10,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
-import { LoginResponseDto } from './dto/login-response.dto';
-import { SignupResponseDto } from './dto/signup-response.dto';
+import { LoginResultDto, UserDto } from './dto/login-response.dto';
+import { SignupUserDto } from './dto/signup-response.dto';
 import { OAuth2Client } from 'google-auth-library';
 import { createHash } from 'crypto';
 import { GoogleAuthDto } from './dto/google-auth.dto';
@@ -92,7 +92,11 @@ export class AuthService {
   // ========================
   // LOCAL AUTH: Sign Up
   // ========================
-  async signUp(dto: SignupRequestDto): Promise<SignupResponseDto> {
+  /**
+   * Register a new user
+   * @returns Raw user data
+   */
+  async signUp(dto: SignupRequestDto): Promise<SignupUserDto> {
     const hash = await bcrypt.hash(dto.password, 10);
     const user = await this.usersService.createLocalUser({
       email: dto.email,
@@ -100,26 +104,26 @@ export class AuthService {
       displayName: dto.displayName,
     });
 
-    const response = new SignupResponseDto();
-    response.data = {
+    return {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
       provider: user.provider,
     };
-    response.success = true;
-    response.message = 'User successfully registered';
-    return response;
   }
 
   // ========================
   // LOCAL AUTH: Login
   // ========================
+  /**
+   * Authenticate user with email and password
+   * @returns Raw login result with user and tokens
+   */
   async login(
     dto: LoginRequestDto,
     deviceInfo?: string,
     ipAddress?: string,
-  ): Promise<LoginResponseDto> {
+  ): Promise<LoginResultDto> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -146,29 +150,31 @@ export class AuthService {
 
     const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
 
-    const response = new LoginResponseDto();
-    response.data = {
-      id: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
-      provider: user.provider,
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        provider: user.provider,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     };
-    response.accessToken = tokens.accessToken;
-    response.refreshToken = tokens.refreshToken;
-    response.success = true;
-    response.message = 'User successfully logged in';
-    return response;
   }
 
   // ========================
   // GOOGLE OAUTH
   // ========================
+  /**
+   * Authenticate user with Google ID token
+   * @returns Raw login result with user and tokens
+   */
   async googleAuth(
     dto: GoogleAuthDto,
     deviceInfo?: string,
     ipAddress?: string,
-  ): Promise<LoginResponseDto> {
+  ): Promise<LoginResultDto> {
     if (!this.googleClient) {
       throw new BadRequestException('Google OAuth is not configured');
     }
@@ -213,30 +219,32 @@ export class AuthService {
 
     const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
 
-    const response = new LoginResponseDto();
-    response.data = {
-      id: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
-      provider: user.provider,
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        provider: user.provider,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     };
-    response.accessToken = tokens.accessToken;
-    response.refreshToken = tokens.refreshToken;
-    response.success = true;
-    response.message = 'Google login successful';
-    return response;
   }
 
   // ========================
   // GOOGLE OAUTH - AUTHORIZATION CODE FLOW
   // More secure than ID token flow
   // ========================
+  /**
+   * Authenticate user with Google Authorization Code
+   * @returns Raw login result with user and tokens
+   */
   async googleCodeAuth(
     dto: GoogleCodeAuthDto,
     deviceInfo?: string,
     ipAddress?: string,
-  ): Promise<LoginResponseDto> {
+  ): Promise<LoginResultDto> {
     if (!this.googleClient) {
       throw new BadRequestException('Google OAuth is not configured');
     }
@@ -302,19 +310,17 @@ export class AuthService {
       // Issue our own JWT tokens
       const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
 
-      const response = new LoginResponseDto();
-      response.data = {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        avatarUrl: user.avatarUrl,
-        provider: user.provider,
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          provider: user.provider,
+        },
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       };
-      response.accessToken = tokens.accessToken;
-      response.refreshToken = tokens.refreshToken;
-      response.success = true;
-      response.message = 'Google login successful';
-      return response;
     } catch (error) {
       if (
         error instanceof BadRequestException ||
@@ -332,11 +338,15 @@ export class AuthService {
   // ========================
   // REFRESH TOKEN
   // ========================
+  /**
+   * Refresh access and refresh tokens
+   * @returns Raw login result with new tokens
+   */
   async refreshTokens(
     dto: RefreshTokenDto,
     deviceInfo?: string,
     ipAddress?: string,
-  ): Promise<LoginResponseDto> {
+  ): Promise<LoginResultDto> {
     // Verify the refresh token JWT
     let decoded: any;
     try {
@@ -373,44 +383,44 @@ export class AuthService {
     const user = storedToken.user;
     const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
 
-    const response = new LoginResponseDto();
-    response.data = {
-      id: user.id,
-      email: user.email,
-      displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
-      provider: user.provider,
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        provider: user.provider,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     };
-    response.accessToken = tokens.accessToken;
-    response.refreshToken = tokens.refreshToken;
-    response.success = true;
-    response.message = 'Tokens refreshed successfully';
-    return response;
   }
 
   // ========================
   // LOGOUT
   // ========================
-  async logout(refreshToken: string): Promise<{ success: boolean }> {
+  /**
+   * Revoke a refresh token
+   */
+  async logout(refreshToken: string): Promise<void> {
     const hashedToken = this.hashToken(refreshToken);
 
     await this.prisma.refreshToken.updateMany({
       where: { token: hashedToken },
       data: { isRevoked: true },
     });
-
-    return { success: true };
   }
 
   // ========================
   // LOGOUT ALL DEVICES
   // ========================
-  async logoutAll(userId: string): Promise<{ success: boolean }> {
+  /**
+   * Revoke all refresh tokens for a user
+   */
+  async logoutAll(userId: string): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: { userId },
       data: { isRevoked: true },
     });
-
-    return { success: true };
   }
 }

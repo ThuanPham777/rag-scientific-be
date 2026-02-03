@@ -17,9 +17,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
 import { UploadSingleResponseDto } from './dto/upload-single.response.dto';
 import { UploadMultiplePdfResponseDto } from './dto/upload-multiple.response.dto';
+import { ApiResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('Upload')
 @Controller('upload')
@@ -33,9 +33,14 @@ export class UploadController {
   @ApiConsumes('multipart/form-data')
   @ApiOkResponse({ type: UploadSingleResponseDto })
   @UseInterceptors(FileInterceptor('file'))
-  async uploadImage(@UploadedFile() file: Express.Multer.File) {
-    const result = await this.uploadService.uploadImage(file);
-    return result;
+  async uploadImage(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<UploadSingleResponseDto> {
+    const data = await this.uploadService.uploadImage(file);
+    return ApiResponseDto.success(
+      data,
+      'Image uploaded successfully',
+    ) as UploadSingleResponseDto;
   }
 
   @Post('pdf')
@@ -43,9 +48,14 @@ export class UploadController {
   @ApiConsumes('multipart/form-data')
   @ApiOkResponse({ type: UploadSingleResponseDto })
   @UseInterceptors(FileInterceptor('file'))
-  async uploadPdf(@UploadedFile() file: Express.Multer.File) {
-    const result = await this.uploadService.uploadPdf(file);
-    return result;
+  async uploadPdf(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<UploadSingleResponseDto> {
+    const data = await this.uploadService.uploadPdf(file);
+    return ApiResponseDto.success(
+      data,
+      'Upload pdf success',
+    ) as UploadSingleResponseDto;
   }
 
   @Post('pdfs')
@@ -53,9 +63,13 @@ export class UploadController {
   @ApiConsumes('multipart/form-data')
   @ApiOkResponse({ type: UploadMultiplePdfResponseDto })
   @UseInterceptors(FilesInterceptor('files'))
-  async uploadMultiplePdf(@UploadedFiles() files: Express.Multer.File[]) {
-    const results = await this.uploadService.uploadMultiplePdf(files);
-
-    return results;
+  async uploadMultiplePdf(
+    @UploadedFiles() files: Express.Multer.File[],
+  ): Promise<UploadMultiplePdfResponseDto> {
+    const data = await this.uploadService.uploadMultiplePdf(files);
+    return ApiResponseDto.success(
+      data,
+      'Upload multiple pdfs success',
+    ) as UploadMultiplePdfResponseDto;
   }
 }

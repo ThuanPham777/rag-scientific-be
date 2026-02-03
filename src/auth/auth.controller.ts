@@ -21,12 +21,14 @@ import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { SignupResponseDto } from './dto/signup-response.dto';
+import { LogoutResponseDto } from './dto/logout-response.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
+import { EmptyResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -60,7 +62,8 @@ export class AuthController {
   @ApiResponse({ status: 409, description: 'Email already in use' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   async signUp(@Body() dto: SignupRequestDto): Promise<SignupResponseDto> {
-    return this.authService.signUp(dto);
+    const data = await this.authService.signUp(dto);
+    return SignupResponseDto.fromUser(data, 'User successfully registered');
   }
 
   @Post('login')
@@ -80,11 +83,12 @@ export class AuthController {
     @Body() dto: LoginRequestDto,
     @Req() req: Request,
   ): Promise<LoginResponseDto> {
-    return this.authService.login(
+    const result = await this.authService.login(
       dto,
       this.getDeviceInfo(req),
       this.getIpAddress(req),
     );
+    return LoginResponseDto.fromResult(result, 'User successfully logged in');
   }
 
   @Post('google')
@@ -104,11 +108,12 @@ export class AuthController {
     @Body() dto: GoogleAuthDto,
     @Req() req: Request,
   ): Promise<LoginResponseDto> {
-    return this.authService.googleAuth(
+    const result = await this.authService.googleAuth(
       dto,
       this.getDeviceInfo(req),
       this.getIpAddress(req),
     );
+    return LoginResponseDto.fromResult(result, 'Google login successful');
   }
 
   @Post('google/code')
@@ -129,11 +134,12 @@ export class AuthController {
     @Body() dto: GoogleCodeAuthDto,
     @Req() req: Request,
   ): Promise<LoginResponseDto> {
-    return this.authService.googleCodeAuth(
+    const result = await this.authService.googleCodeAuth(
       dto,
       this.getDeviceInfo(req),
       this.getIpAddress(req),
     );
+    return LoginResponseDto.fromResult(result, 'Google login successful');
   }
 
   @Post('refresh')
@@ -153,11 +159,12 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
   ): Promise<LoginResponseDto> {
-    return this.authService.refreshTokens(
+    const result = await this.authService.refreshTokens(
       dto,
       this.getDeviceInfo(req),
       this.getIpAddress(req),
     );
+    return LoginResponseDto.fromResult(result, 'Tokens refreshed successfully');
   }
 
   @Post('logout')
@@ -167,9 +174,14 @@ export class AuthController {
     description: 'Revoke the refresh token',
   })
   @ApiBody({ type: LogoutDto })
-  @ApiResponse({ status: 200, description: 'Logged out successfully' })
-  async logout(@Body() dto: LogoutDto) {
-    return this.authService.logout(dto.refreshToken);
+  @ApiResponse({
+    status: 200,
+    description: 'Logged out successfully',
+    type: LogoutResponseDto,
+  })
+  async logout(@Body() dto: LogoutDto): Promise<LogoutResponseDto> {
+    await this.authService.logout(dto.refreshToken);
+    return EmptyResponseDto.success('Logged out successfully');
   }
 
   @Post('logout-all')
@@ -180,8 +192,13 @@ export class AuthController {
     summary: 'Logout from all devices',
     description: 'Revoke all refresh tokens for the user',
   })
-  @ApiResponse({ status: 200, description: 'Logged out from all devices' })
-  async logoutAll(@CurrentUser() user: any) {
-    return this.authService.logoutAll(user.sub);
+  @ApiResponse({
+    status: 200,
+    description: 'Logged out from all devices',
+    type: LogoutResponseDto,
+  })
+  async logoutAll(@CurrentUser() user: any): Promise<LogoutResponseDto> {
+    await this.authService.logoutAll(user.sub);
+    return EmptyResponseDto.success('Logged out from all devices');
   }
 }

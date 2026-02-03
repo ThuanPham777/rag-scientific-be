@@ -1,7 +1,11 @@
+// src/auth/dto/login-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BaseResponseDto } from '../../common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
-export class LoginUserResponseDto {
+/**
+ * User data returned in login response
+ */
+export class UserDto {
   @ApiProperty({ description: 'User ID', example: 'uuid-here' })
   id: string;
 
@@ -25,13 +29,58 @@ export class LoginUserResponseDto {
   provider: string;
 }
 
-export class LoginResponseDto extends BaseResponseDto<LoginUserResponseDto> {
-  @ApiProperty()
+// Alias for backward compatibility
+export { UserDto as LoginUserResponseDto };
+
+/**
+ * Raw login result from service (with tokens)
+ */
+export class LoginResultDto {
+  @ApiProperty({ type: UserDto, description: 'User data' })
+  user: UserDto;
+
+  @ApiProperty({
+    description: 'JWT access token',
+    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  })
   accessToken: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'JWT refresh token',
+    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  })
+  refreshToken: string;
+}
+
+/**
+ * Login response DTO (for Swagger documentation)
+ */
+export class LoginResponseDto extends ApiResponseDto<UserDto> {
+  @ApiProperty({
+    description: 'JWT access token',
+    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  })
+  accessToken: string;
+
+  @ApiProperty({
+    description: 'JWT refresh token',
+    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+  })
   refreshToken: string;
 
-  @ApiProperty({ type: LoginUserResponseDto })
-  declare data: LoginUserResponseDto;
+  @ApiProperty({ type: UserDto })
+  declare data: UserDto;
+
+  /**
+   * Create login response from raw result
+   */
+  static fromResult(result: LoginResultDto, message: string): LoginResponseDto {
+    const response = new LoginResponseDto();
+    response.success = true;
+    response.message = message;
+    response.data = result.user;
+    response.accessToken = result.accessToken;
+    response.refreshToken = result.refreshToken;
+    return response;
+  }
 }

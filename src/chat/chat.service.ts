@@ -10,10 +10,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
 import { AskQuestionRequestDto } from './dto/ask-question-request.dto';
 import {
-  AskQuestionResponseDto,
   AskQuestionResultDto,
   ChatCitationDto,
 } from './dto/ask-question-response.dto';
+import {
+  AskMultiPaperResultDto,
+  MultiPaperSourceDto,
+  ConversationPaperDto,
+} from './dto/ask-multi-paper-request.dto';
+import { MessageItemDto } from './dto/get-messages-response.dto';
 import { MessageRole, ConversationType } from '@prisma/client';
 
 interface RagContextItem {
@@ -159,10 +164,14 @@ export class ChatService {
     return citations;
   }
 
+  /**
+   * Ask a question about a paper
+   * @returns Raw question result
+   */
   async askQuestion(
     userId: string,
     dto: AskQuestionRequestDto,
-  ): Promise<AskQuestionResponseDto> {
+  ): Promise<AskQuestionResultDto> {
     const { conversationId, question, imageUrl } = dto;
 
     // 1. Verify conversation ownership and get paper info
@@ -237,7 +246,7 @@ export class ChatService {
       data: { updatedAt: new Date() },
     });
 
-    // 6. Build response
+    // 6. Build and return raw result
     const result = new AskQuestionResultDto();
     result.answer = answerText;
     result.citations = rawCitations.map((c: any) => this.mapCitation(c));
@@ -246,18 +255,17 @@ export class ChatService {
     result.modelName = modelName;
     result.tokenCount = tokenCount;
 
-    const response = new AskQuestionResponseDto();
-    response.success = true;
-    response.message = 'Answer generated';
-    response.data = result;
-
-    return response;
+    return result;
   }
 
   /**
    * Get message history for a conversation
+   * @returns Raw array of messages
    */
-  async getMessageHistory(userId: string, conversationId: string) {
+  async getMessageHistory(
+    userId: string,
+    conversationId: string,
+  ): Promise<MessageItemDto[]> {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
       include: {
@@ -318,8 +326,8 @@ export class ChatService {
     });
 
     // Map messages and extract citations from context for assistant messages
-    const mappedMessages = messages.map((msg) => {
-      const base: any = {
+    return messages.map((msg) => {
+      const base: MessageItemDto = {
         id: msg.id,
         role: msg.role,
         content: msg.content,
@@ -351,16 +359,11 @@ export class ChatService {
 
       return base;
     });
-
-    return {
-      success: true,
-      message: 'Messages retrieved',
-      data: mappedMessages,
-    };
   }
 
   /**
    * Explain a selected region in the PDF
+   * @returns Raw question result
    */
   async explainRegion(
     userId: string,
@@ -371,7 +374,7 @@ export class ChatService {
       pageNumber?: number;
       question?: string;
     },
-  ): Promise<AskQuestionResponseDto> {
+  ): Promise<AskQuestionResultDto> {
     let conversation: any;
     let conversationId = dto.conversationId;
 
@@ -487,7 +490,7 @@ export class ChatService {
       },
     });
 
-    // Build response
+    // Build and return raw result
     const result = new AskQuestionResultDto();
     result.answer = ragResponse.answer || '';
     result.citations = this.extractCitationsFromContext(
@@ -497,16 +500,12 @@ export class ChatService {
     result.userMessageId = userMessage.id;
     result.conversationId = conversationId;
 
-    const response = new AskQuestionResponseDto();
-    response.success = true;
-    response.message = 'Region explained';
-    response.data = result;
-
-    return response;
+    return result;
   }
 
   /**
    * Ask a question across multiple papers
+   * @returns Raw multi-paper result
    */
   async askMultiPaper(
     userId: string,
@@ -515,7 +514,7 @@ export class ChatService {
       question: string;
       conversationId?: string;
     },
-  ) {
+  ): Promise<AskMultiPaperResultDto> {
     const { paperIds, question, conversationId } = dto;
 
     // 1. Verify all papers belong to user and have ragFileId
@@ -704,31 +703,33 @@ export class ChatService {
     });
 
     // 8. Get all papers in conversation for response
-    const conversationPapers = paperIds.map((id, index) => {
-      const paperInfo = paperInfoMap.get(id);
-      return {
-        paperId: id,
-        orderIndex: index,
-        fileName: paperInfo?.fileName || 'Unknown',
-        fileUrl: paperInfo?.fileUrl || null,
-      };
-    });
-
-    return {
-      success: true,
-      message: 'Multi-paper answer generated',
-      data: {
-        answer: answerText,
-        citations: mappedCitations,
-        sources,
-        conversationPapers, // Include all papers in conversation
-        assistantMessageId: assistantMessage.id,
-        userMessageId: userMessage.id,
-        conversationId: actualConversationId,
+    const conversationPapers: ConversationPaperDto[] = paperIds.map(
+      (id, index) => {
+        const paperInfo = paperInfoMap.get(id);
+        return {
+          paperId: id,
+          orderIndex: index,
+          fileName: paperInfo?.fileName || 'Unknown',
+          fileUrl: paperInfo?.fileUrl || null,
+        };
       },
-    };
+    );
+
+    const result = new AskMultiPaperResultDto();
+    result.answer = answerText;
+    result.citations = mappedCitations;
+    result.sources = sources;
+    result.conversationPapers = conversationPapers;
+    result.assistantMessageId = assistantMessage.id;
+    result.userMessageId = userMessage.id;
+    result.conversationId = actualConversationId;
+
+    return result;
   }
 
+  /**
+   * Clear chat history for a conversation
+   */
   async clearChatHistory(
     userId: string,
     conversationId: string,

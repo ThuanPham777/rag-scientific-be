@@ -1,8 +1,12 @@
+// src/upload/dto/upload-single.response.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 import { UploadResultDto } from './upload-result.dto';
 
-export class UploadSingleResponseDto extends BaseResponseDto<UploadResultDto> {
+/**
+ * Single file upload response
+ */
+export class UploadSingleResponseDto extends ApiResponseDto<UploadResultDto> {
   @ApiProperty({ type: UploadResultDto })
-  declare data?: UploadResultDto;
+  declare data: UploadResultDto;
 }

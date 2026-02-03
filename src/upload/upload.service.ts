@@ -1,14 +1,25 @@
 // src/upload/upload.service.ts
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { S3Service } from './s3.service';
-import { UploadSingleResponseDto } from './dto/upload-single.response.dto';
-import { UploadMultiplePdfResponseDto } from './dto/upload-multiple.response.dto';
+import { UploadResultDto } from './dto/upload-result.dto';
+
+/**
+ * Multiple upload result data
+ */
+export interface MultipleUploadResultDto {
+  count: number;
+  items: Array<{ key: string; url: string }>;
+}
 
 @Injectable()
 export class UploadService {
   constructor(private readonly s3Service: S3Service) {}
 
-  async uploadImage(file: Express.Multer.File) {
+  /**
+   * Upload a single image
+   * @returns Raw upload result
+   */
+  async uploadImage(file: Express.Multer.File): Promise<UploadResultDto> {
     if (!file) {
       throw new BadRequestException('File is required');
     }
@@ -32,7 +43,11 @@ export class UploadService {
     );
   }
 
-  async uploadPdf(file: Express.Multer.File): Promise<UploadSingleResponseDto> {
+  /**
+   * Upload a single PDF
+   * @returns Raw upload result
+   */
+  async uploadPdf(file: Express.Multer.File): Promise<UploadResultDto> {
     if (!file) {
       throw new BadRequestException('File is required');
     }
@@ -46,25 +61,21 @@ export class UploadService {
       throw new BadRequestException('File is too large (max 50MB)');
     }
 
-    const result = await this.s3Service.uploadFile(
+    return this.s3Service.uploadFile(
       file.buffer,
       file.originalname,
       'pdf',
       file.mimetype,
     );
-
-    const responseDto: UploadSingleResponseDto = {
-      data: result,
-      message: 'Upload pdf success',
-      success: true,
-    };
-
-    return responseDto;
   }
 
+  /**
+   * Upload multiple PDFs
+   * @returns Raw multiple upload result
+   */
   async uploadMultiplePdf(
     files: Express.Multer.File[],
-  ): Promise<UploadMultiplePdfResponseDto> {
+  ): Promise<MultipleUploadResultDto> {
     if (!files || files.length === 0) {
       throw new BadRequestException('Files are required');
     }
@@ -90,12 +101,8 @@ export class UploadService {
     }
 
     return {
-      success: true,
-      message: 'Upload multiple pdfs success',
-      data: {
-        count: items.length,
-        items,
-      },
+      count: items.length,
+      items,
     };
   }
 }

@@ -1,8 +1,12 @@
+// src/upload/dto/upload-multiple.response.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 import { UploadMultipleResultDto } from './upload-multiple-result.dto';
 
-export class UploadMultiplePdfResponseDto extends BaseResponseDto<UploadMultipleResultDto> {
+/**
+ * Multiple file upload response
+ */
+export class UploadMultiplePdfResponseDto extends ApiResponseDto<UploadMultipleResultDto> {
   @ApiProperty({ type: UploadMultipleResultDto })
-  declare data?: UploadMultipleResultDto;
+  declare data: UploadMultipleResultDto;
 }

@@ -6,11 +6,40 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ConversationType } from '@prisma/client';
 import { CreateConversationRequestDto } from './dto/create-conversation-request.dto';
-import {
-  CreateConversationResponseDto,
-  ConversationItemDto,
-} from './dto/create-conversation-response.dto';
-import { ListConversationsResponseDto } from './dto/list-conversations-response.dto';
+import { ConversationItemDto } from './dto/create-conversation-response.dto';
+
+/**
+ * Conversation with extra fields for list response
+ */
+export interface ConversationListItem extends ConversationItemDto {
+  ragFileId?: string;
+  paperTitle?: string;
+}
+
+/**
+ * Conversation detail with messages
+ */
+export interface ConversationDetail extends ConversationItemDto {
+  ragFileId?: string;
+  paperTitle?: string;
+  paperUrl?: string;
+  papers: Array<{
+    id: string;
+    ragFileId: string;
+    title?: string;
+    fileName: string;
+    fileUrl: string;
+    orderIndex: number;
+  }>;
+  messages: Array<{
+    id: string;
+    role: string;
+    content: string;
+    imageUrl?: string;
+    context?: any;
+    createdAt: Date;
+  }>;
+}
 
 @Injectable()
 export class ConversationService {
@@ -28,10 +57,14 @@ export class ConversationService {
     return dto;
   }
 
+  /**
+   * Create a new conversation
+   * @returns Raw conversation item
+   */
   async createConversation(
     userId: string,
     dto: CreateConversationRequestDto,
-  ): Promise<CreateConversationResponseDto> {
+  ): Promise<ConversationItemDto> {
     // Find paper by ragFileId or id
     const paper = await this.prisma.paper.findFirst({
       where: {
@@ -56,18 +89,18 @@ export class ConversationService {
       },
     });
 
-    const res = new CreateConversationResponseDto();
-    res.success = true;
-    res.message = 'Conversation created';
-    res.data = this.mapToItem(conv);
-    return res;
+    return this.mapToItem(conv);
   }
 
+  /**
+   * List conversations for a user
+   * @returns Raw array of conversation items
+   */
   async listConversations(
     userId: string,
     paperId?: string,
     type?: ConversationType,
-  ): Promise<ListConversationsResponseDto> {
+  ): Promise<ConversationListItem[]> {
     const whereClause: any = { userId };
 
     // Default to SINGLE_PAPER if no type specified (backward compatibility)
@@ -106,18 +139,21 @@ export class ConversationService {
       },
     });
 
-    const res = new ListConversationsResponseDto();
-    res.success = true;
-    res.message = 'List of conversations';
-    res.data = convs.map((c) => ({
+    return convs.map((c) => ({
       ...this.mapToItem(c),
       ragFileId: c.paper?.ragFileId,
       paperTitle: c.paper?.title,
     }));
-    return res;
   }
 
-  async getConversationById(userId: string, id: string) {
+  /**
+   * Get conversation by ID with messages
+   * @returns Raw conversation detail with messages
+   */
+  async getConversationById(
+    userId: string,
+    id: string,
+  ): Promise<ConversationDetail> {
     const conv = await this.prisma.conversation.findFirst({
       where: { id, userId },
       include: {
@@ -180,31 +216,27 @@ export class ConversationService {
           : [];
 
     return {
-      success: true,
-      message: 'Conversation found',
-      data: {
-        ...this.mapToItem(conv),
-        ragFileId: conv.paper?.ragFileId,
-        paperTitle: conv.paper?.title,
-        paperUrl: conv.paper?.fileUrl,
-        // Include papers array for multi-paper support
-        papers,
-        messages: conv.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          imageUrl: m.imageUrl,
-          context: m.context,
-          createdAt: m.createdAt,
-        })),
-      },
+      ...this.mapToItem(conv),
+      ragFileId: conv.paper?.ragFileId,
+      paperTitle: conv.paper?.title,
+      paperUrl: conv.paper?.fileUrl,
+      // Include papers array for multi-paper support
+      papers,
+      messages: conv.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        imageUrl: m.imageUrl,
+        context: m.context,
+        createdAt: m.createdAt,
+      })),
     };
   }
 
-  async deleteConversation(
-    userId: string,
-    id: string,
-  ): Promise<{ success: boolean }> {
+  /**
+   * Delete a conversation
+   */
+  async deleteConversation(userId: string, id: string): Promise<void> {
     const conv = await this.prisma.conversation.findFirst({
       where: { id, userId },
     });
@@ -214,7 +246,5 @@ export class ConversationService {
     }
 
     await this.prisma.conversation.delete({ where: { id } });
-
-    return { success: true };
   }
 }

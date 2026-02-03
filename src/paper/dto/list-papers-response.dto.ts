@@ -1,8 +1,12 @@
+// src/paper/dto/list-papers-response.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
 import { PaperItemDto } from './create-paper-response.dto';
-import { BaseResponseDto } from 'src/common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
-export class ListPapersResponseDto extends BaseResponseDto<PaperItemDto[]> {
-  @ApiProperty({ type: [PaperItemDto] })
+/**
+ * List papers response DTO
+ */
+export class ListPapersResponseDto extends ApiResponseDto<PaperItemDto[]> {
+  @ApiProperty({ type: [PaperItemDto], description: 'List of papers' })
   declare data: PaperItemDto[];
 }

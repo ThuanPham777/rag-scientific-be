@@ -1,48 +1,71 @@
+// src/paper/dto/create-paper-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BaseResponseDto } from '../../common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
+/**
+ * Paper item DTO - represents a single paper
+ */
 export class PaperItemDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Paper ID', example: 'uuid-here' })
   id: string;
 
-  @ApiProperty({ description: 'RAG file_id for querying' })
+  @ApiProperty({
+    description: 'RAG file_id for querying',
+    example: 'uuid-here',
+  })
   ragFileId: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Original filename', example: 'paper.pdf' })
   fileName: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'File URL (S3/Cloud)',
+    example: 'https://bucket.s3.amazonaws.com/paper.pdf',
+  })
   fileUrl: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'File size in bytes', example: 1024000 })
   fileSize?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'Extracted paper title',
+    example: 'Deep Learning for NLP',
+  })
   title?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'Extracted paper abstract',
+    example: 'This paper presents...',
+  })
   abstract?: string;
 
-  @ApiProperty({ enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
+  @ApiProperty({
+    description: 'Processing status',
+    enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'],
+    example: 'COMPLETED',
+  })
   status: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Number of text nodes', example: 150 })
   nodeCount?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Number of tables', example: 5 })
   tableCount?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Number of images', example: 10 })
   imageCount?: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Creation timestamp' })
   createdAt: Date;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Processing completion timestamp' })
   processedAt?: Date;
 }
 
-export class CreatePaperResponseDto extends BaseResponseDto<PaperItemDto> {
+/**
+ * Create paper response DTO
+ */
+export class CreatePaperResponseDto extends ApiResponseDto<PaperItemDto> {
   @ApiProperty({ type: PaperItemDto })
   declare data: PaperItemDto;
 }

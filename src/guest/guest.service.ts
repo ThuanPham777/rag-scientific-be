@@ -3,9 +3,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { S3Service } from '../upload/s3.service';
 import {
-  GuestUploadResponseDto,
+  GuestUploadResultDto,
   GuestAskQuestionDto,
-  GuestAskQuestionResponseDto,
   GuestAskQuestionResultDto,
   GuestCitationDto,
   GuestExplainRegionDto,
@@ -65,7 +64,7 @@ export class GuestService {
    * Upload PDF for guest user - uploads to S3 and starts ingest in background
    * Returns immediately after S3 upload
    */
-  async uploadPdf(file: Express.Multer.File): Promise<GuestUploadResponseDto> {
+  async uploadPdf(file: Express.Multer.File): Promise<GuestUploadResultDto> {
     if (!file) {
       throw new BadRequestException('File is required');
     }
@@ -98,15 +97,11 @@ export class GuestService {
     this.ingestInBackground(ragFileId, s3Result.url);
 
     return {
-      success: true,
-      message: 'PDF uploaded, processing in background',
-      data: {
-        paperId,
-        ragFileId,
-        fileName: file.originalname,
-        fileUrl: s3Result.url,
-        status: 'PROCESSING',
-      },
+      paperId,
+      ragFileId,
+      fileName: file.originalname,
+      fileUrl: s3Result.url,
+      status: 'PROCESSING',
     };
   }
 
@@ -143,7 +138,7 @@ export class GuestService {
    */
   async askQuestion(
     dto: GuestAskQuestionDto,
-  ): Promise<GuestAskQuestionResponseDto> {
+  ): Promise<GuestAskQuestionResultDto> {
     const { ragFileId, question } = dto;
 
     // Check if still processing
@@ -186,11 +181,7 @@ export class GuestService {
     result.modelName = ragResponse.context?.model_name || 'rag-model';
     result.tokenCount = ragResponse.context?.token_count || 0;
 
-    return {
-      success: true,
-      message: 'Answer generated',
-      data: result,
-    };
+    return result;
   }
 
   /**
@@ -198,7 +189,7 @@ export class GuestService {
    */
   async explainRegion(
     dto: GuestExplainRegionDto,
-  ): Promise<GuestAskQuestionResponseDto> {
+  ): Promise<GuestAskQuestionResultDto> {
     const { ragFileId, imageBase64, pageNumber, question } = dto;
 
     // Check if still processing
@@ -252,11 +243,7 @@ export class GuestService {
     result.modelName = ragResponse.context?.model_name || 'rag-model';
     result.tokenCount = ragResponse.context?.token_count || 0;
 
-    return {
-      success: true,
-      message: 'Region explained',
-      data: result,
-    };
+    return result;
   }
 
   /**

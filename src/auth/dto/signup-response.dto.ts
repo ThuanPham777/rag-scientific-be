@@ -1,7 +1,11 @@
+// src/auth/dto/signup-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BaseResponseDto } from '../../common/dto/base-response.dto';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
-export class SignupUserResponseDto {
+/**
+ * User data returned in signup response
+ */
+export class SignupUserDto {
   @ApiProperty({ description: 'User ID', example: 'uuid-here' })
   id: string;
 
@@ -19,7 +23,24 @@ export class SignupUserResponseDto {
   provider: string;
 }
 
-export class SignupResponseDto extends BaseResponseDto<SignupUserResponseDto> {
-  @ApiProperty({ type: SignupUserResponseDto })
-  declare data: SignupUserResponseDto;
+// Alias for backward compatibility
+export { SignupUserDto as SignupUserResponseDto };
+
+/**
+ * Signup response DTO (for Swagger documentation)
+ */
+export class SignupResponseDto extends ApiResponseDto<SignupUserDto> {
+  @ApiProperty({ type: SignupUserDto })
+  declare data: SignupUserDto;
+
+  /**
+   * Create signup response from raw user data
+   */
+  static fromUser(user: SignupUserDto, message: string): SignupResponseDto {
+    const response = new SignupResponseDto();
+    response.success = true;
+    response.message = message;
+    response.data = user;
+    return response;
+  }
 }

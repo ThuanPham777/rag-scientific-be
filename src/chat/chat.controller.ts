@@ -22,8 +22,14 @@ import {
   AskMultiPaperRequestDto,
   AskMultiPaperResponseDto,
 } from './dto/ask-multi-paper-request.dto';
+import { GetMessagesResponseDto } from './dto/get-messages-response.dto';
+import { ClearHistoryResponseDto } from './dto/clear-history-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ExplainRegionRequestDto } from './dto/explain-region-request.dto';
+import {
+  ApiResponseDto,
+  EmptyResponseDto,
+} from '../common/dto/api-response.dto';
 
 @ApiTags('Chat')
 @ApiBearerAuth()
@@ -35,50 +41,74 @@ export class ChatController {
   @Post('ask')
   @ApiOperation({ summary: 'Ask a question about the paper (RAG Q&A)' })
   @ApiOkResponse({ type: AskQuestionResponseDto })
-  ask(
+  async ask(
     @CurrentUser() user: any,
     @Body() dto: AskQuestionRequestDto,
   ): Promise<AskQuestionResponseDto> {
-    return this.chatService.askQuestion(user.id, dto);
+    const data = await this.chatService.askQuestion(user.id, dto);
+    return ApiResponseDto.success(
+      data,
+      'Answer generated',
+    ) as AskQuestionResponseDto;
   }
 
   @Post('ask-multi')
   @ApiOperation({ summary: 'Ask a question across multiple papers' })
   @ApiOkResponse({ type: AskMultiPaperResponseDto })
-  askMultiPaper(
+  async askMultiPaper(
     @CurrentUser() user: any,
     @Body() dto: AskMultiPaperRequestDto,
-  ) {
-    return this.chatService.askMultiPaper(user.id, dto);
+  ): Promise<AskMultiPaperResponseDto> {
+    const data = await this.chatService.askMultiPaper(user.id, dto);
+    return ApiResponseDto.success(
+      data,
+      'Multi-paper answer generated',
+    ) as AskMultiPaperResponseDto;
   }
 
   @Get('messages/:conversationId')
   @ApiOperation({ summary: 'Get message history for a conversation' })
   @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
-  getMessages(
+  @ApiOkResponse({ type: GetMessagesResponseDto })
+  async getMessages(
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
-  ) {
-    return this.chatService.getMessageHistory(user.id, conversationId);
+  ): Promise<GetMessagesResponseDto> {
+    const data = await this.chatService.getMessageHistory(
+      user.id,
+      conversationId,
+    );
+    return ApiResponseDto.success(
+      data,
+      'Messages retrieved',
+    ) as GetMessagesResponseDto;
   }
 
   @Post('explain-region')
   @ApiOperation({ summary: 'Explain a selected region in the PDF' })
   @ApiOkResponse({ type: AskQuestionResponseDto })
-  explainRegion(
+  async explainRegion(
     @CurrentUser() user: any,
     @Body() dto: ExplainRegionRequestDto,
   ): Promise<AskQuestionResponseDto> {
-    return this.chatService.explainRegion(user.id, dto);
+    const data = await this.chatService.explainRegion(user.id, dto);
+    return ApiResponseDto.success(
+      data,
+      'Region explained',
+    ) as AskQuestionResponseDto;
   }
 
   @Delete('history/:conversationId')
   @ApiOperation({ summary: 'Clear chat history for a conversation' })
   @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
-  clearChatHistory(
+  @ApiOkResponse({ type: ClearHistoryResponseDto })
+  async clearChatHistory(
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
-  ) {
-    return this.chatService.clearChatHistory(user.id, conversationId);
+  ): Promise<ClearHistoryResponseDto> {
+    await this.chatService.clearChatHistory(user.id, conversationId);
+    return EmptyResponseDto.success(
+      'Chat history cleared successfully',
+    ) as ClearHistoryResponseDto;
   }
 }
