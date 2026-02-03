@@ -374,8 +374,9 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token has expired');
     }
 
-    // Delete old token (rotation)
-    await this.prisma.refreshToken.delete({
+    // Delete old token (rotation) - use deleteMany to avoid error if already deleted
+    // This can happen when multiple refresh requests are sent simultaneously
+    await this.prisma.refreshToken.deleteMany({
       where: { id: storedToken.id },
     });
 
