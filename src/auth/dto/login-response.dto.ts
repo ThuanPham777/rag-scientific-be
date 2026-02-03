@@ -4,27 +4,46 @@ import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
 /**
  * User data returned in login response
+ *
+ * @description Thông tin cơ bản của user sau khi đăng nhập/đăng ký thành công.
+ * Bao gồm profile info và authentication provider.
  */
 export class UserDto {
-  @ApiProperty({ description: 'User ID', example: 'uuid-here' })
+  @ApiProperty({
+    description: 'User ID (UUID v4) - Primary key trong database',
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    format: 'uuid',
+  })
   id: string;
 
-  @ApiProperty({ description: 'User email', example: 'user@example.com' })
+  @ApiProperty({
+    description: 'Email đăng nhập - unique trong hệ thống',
+    example: 'researcher@university.edu',
+    format: 'email',
+  })
   email: string;
 
-  @ApiPropertyOptional({ description: 'Display name', example: 'John Doe' })
+  @ApiPropertyOptional({
+    description: 'Tên hiển thị - có thể từ Google profile hoặc tự đặt',
+    example: 'Nguyễn Văn A',
+    maxLength: 100,
+  })
   displayName?: string;
 
   @ApiPropertyOptional({
-    description: 'Avatar URL',
-    example: 'https://example.com/avatar.jpg',
+    description:
+      'URL avatar - từ Google profile hoặc upload. Dùng cho hiển thị UI.',
+    example: 'https://lh3.googleusercontent.com/a/ACg8ocJ...',
+    format: 'uri',
   })
   avatarUrl?: string;
 
   @ApiProperty({
-    description: 'Auth provider',
-    example: 'LOCAL',
+    description:
+      'Phương thức xác thực - LOCAL (email/password) hoặc GOOGLE (OAuth 2.0)',
+    example: 'GOOGLE',
     enum: ['LOCAL', 'GOOGLE'],
+    enumName: 'AuthProvider',
   })
   provider: string;
 }
@@ -34,41 +53,60 @@ export { UserDto as LoginUserResponseDto };
 
 /**
  * Raw login result from service (with tokens)
+ *
+ * @description Kết quả trả về từ AuthService.login() bao gồm cả tokens.
+ * Service trả raw data, Controller wrap thành response format.
  */
 export class LoginResultDto {
-  @ApiProperty({ type: UserDto, description: 'User data' })
+  @ApiProperty({
+    type: UserDto,
+    description: 'Thông tin user đã đăng nhập',
+  })
   user: UserDto;
 
   @ApiProperty({
-    description: 'JWT access token',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+    description:
+      'JWT Access Token - dùng cho Authorization header. Hết hạn sau 15 phút.',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWlkIiwiZXhwIjoxNzA...',
+    format: 'jwt',
   })
   accessToken: string;
 
   @ApiProperty({
-    description: 'JWT refresh token',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+    description:
+      'JWT Refresh Token - dùng để lấy access token mới. Hết hạn sau 7 ngày. Lưu HttpOnly cookie.',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWlkIiwiZXhwIjoxNzA...',
+    format: 'jwt',
   })
   refreshToken: string;
 }
 
 /**
  * Login response DTO (for Swagger documentation)
+ *
+ * @description Response trả về khi đăng nhập/đăng ký thành công.
+ * Bao gồm user info và JWT tokens để authenticate các request tiếp theo.
  */
 export class LoginResponseDto extends ApiResponseDto<UserDto> {
   @ApiProperty({
-    description: 'JWT access token',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+    description:
+      'JWT Access Token - gửi trong header `Authorization: Bearer <token>` cho các request cần auth',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWlkIiwiZXhwIjoxNzA...',
   })
   accessToken: string;
 
   @ApiProperty({
-    description: 'JWT refresh token',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+    description:
+      'JWT Refresh Token - gọi `/auth/refresh` khi access token hết hạn để lấy token mới',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWlkIiwiZXhwIjoxNzA...',
   })
   refreshToken: string;
 
-  @ApiProperty({ type: UserDto })
+  @ApiProperty({ type: UserDto, description: 'Thông tin user đã đăng nhập' })
   declare data: UserDto;
 
   /**
