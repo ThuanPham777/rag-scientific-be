@@ -78,7 +78,19 @@ export class ChatService {
     c.sourceId = raw.source_id ?? raw.sourceId ?? null;
     c.sectionTitle =
       raw.section_title ?? raw.type ?? raw.metadata?.section_title ?? null;
-    c.bbox = raw.bbox ?? raw.metadata?.bbox ?? null;
+
+    // Parse bbox - it might be a JSON string from Chroma
+    let parsedBBox = raw.bbox ?? raw.metadata?.bbox ?? null;
+    if (typeof parsedBBox === 'string') {
+      try {
+        parsedBBox = JSON.parse(parsedBBox);
+      } catch {
+        parsedBBox = null;
+      }
+    }
+    c.bbox = parsedBBox;
+
+    // Parse layout dimensions
     c.layoutWidth = raw.layout_width ?? raw.metadata?.layout_width ?? null;
     c.layoutHeight = raw.layout_height ?? raw.metadata?.layout_height ?? null;
 
