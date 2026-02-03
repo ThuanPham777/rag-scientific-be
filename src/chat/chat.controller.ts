@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -62,5 +70,15 @@ export class ChatController {
     @Body() dto: ExplainRegionRequestDto,
   ): Promise<AskQuestionResponseDto> {
     return this.chatService.explainRegion(user.id, dto);
+  }
+
+  @Delete('history/:conversationId')
+  @ApiOperation({ summary: 'Clear chat history for a conversation' })
+  @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
+  clearChatHistory(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.chatService.clearChatHistory(user.id, conversationId);
   }
 }

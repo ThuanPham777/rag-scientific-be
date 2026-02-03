@@ -728,4 +728,23 @@ export class ChatService {
       },
     };
   }
+
+  async clearChatHistory(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, userId },
+    });
+
+    if (!conversation) {
+      throw new ForbiddenException(
+        'Conversation not found or not owned by user',
+      );
+    }
+
+    await this.prisma.message.deleteMany({
+      where: { conversationId },
+    });
+  }
 }
