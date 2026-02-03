@@ -158,6 +158,7 @@ model Paper {
   user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder          Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
   conversations   Conversation[]
+  conversationPapers ConversationPaper[]  // For multi-paper conversations
   suggestedQuestions SuggestedQuestion[]
   relatedPapers   RelatedPaper[]
 
@@ -179,6 +180,12 @@ enum PaperStatus {
 // SECTION 3: CONVERSATION & CHAT HISTORY
 // ============================================================================
 
+/// Conversation type - distinguishes single-paper from multi-paper chats
+enum ConversationType {
+  SINGLE_PAPER  // Chat with one specific paper
+  MULTI_PAPER   // Chat across multiple papers
+}
+
 /// Conversation - chat session with a paper
 model Conversation {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -186,6 +193,7 @@ model Conversation {
   paperId       String   @map("paper_id") @db.Uuid
 
   title         String?  @db.VarChar(300)                           // Auto-generated or user-set
+  type          ConversationType @default(SINGLE_PAPER)             // Type of conversation
 
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
@@ -194,11 +202,33 @@ model Conversation {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages      Message[]
+  conversationPapers ConversationPaper[]  // For multi-paper conversations
 
   @@index([userId])
   @@index([paperId])
   @@index([createdAt])
+  @@index([type])
   @@map("conversations")
+}
+
+/// ConversationPaper - Join table for multi-paper conversations
+/// Stores which papers are included in a multi-paper conversation
+model ConversationPaper {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String   @map("conversation_id") @db.Uuid
+  paperId         String   @map("paper_id") @db.Uuid
+  orderIndex      Int      @default(0) @map("order_index")          // Order of paper in conversation
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  paper           Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, paperId])  // Each paper can only be added once per conversation
+  @@index([conversationId])
+  @@index([paperId])
+  @@map("conversation_papers")
 }
 
 /// Message - individual chat message (user question or AI answer)

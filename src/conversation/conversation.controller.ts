@@ -48,11 +48,22 @@ export class ConversationController {
     required: false,
     description: 'Filter by paper ID or RAG file_id',
   })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['SINGLE_PAPER', 'MULTI_PAPER'],
+    description: 'Filter by conversation type',
+  })
   list(
     @CurrentUser() user: any,
     @Query('paperId') paperId?: string,
+    @Query('type') type?: 'SINGLE_PAPER' | 'MULTI_PAPER',
   ): Promise<ListConversationsResponseDto> {
-    return this.conversationService.listConversations(user.id, paperId);
+    return this.conversationService.listConversations(
+      user.id,
+      paperId,
+      type as any,
+    );
   }
 
   @Get(':id')

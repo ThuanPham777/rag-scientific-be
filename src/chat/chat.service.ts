@@ -14,7 +14,7 @@ import {
   AskQuestionResultDto,
   ChatCitationDto,
 } from './dto/ask-question-response.dto';
-import { MessageRole } from '@prisma/client';
+import { MessageRole, ConversationType } from '@prisma/client';
 
 interface RagContextItem {
   source_id: string;
@@ -65,7 +65,10 @@ export class ChatService {
     this.ragServiceUrl = process.env.RAG_SERVICE_URL || 'http://127.0.0.1:8000';
   }
 
-  private mapCitation(raw: any): ChatCitationDto {
+  private mapCitation(
+    raw: any,
+    ragFileIdToPaperId?: Map<string, string>,
+  ): ChatCitationDto {
     const c = new ChatCitationDto();
     c.pageNumber = raw.page_number ?? raw.pageNumber ?? raw.page ?? null;
     c.snippet = raw.snippet ?? raw.text ?? null;
@@ -78,6 +81,17 @@ export class ChatService {
     c.bbox = raw.bbox ?? raw.metadata?.bbox ?? null;
     c.layoutWidth = raw.layout_width ?? raw.metadata?.layout_width ?? null;
     c.layoutHeight = raw.layout_height ?? raw.metadata?.layout_height ?? null;
+
+    // Extract source paper ID from metadata and map to actual paper ID
+    const ragSourcePaperId =
+      raw.metadata?.source_paper_id ?? raw.metadata?.paper_id ?? null;
+    if (ragSourcePaperId && ragFileIdToPaperId) {
+      c.sourcePaperId =
+        ragFileIdToPaperId.get(ragSourcePaperId) ?? ragSourcePaperId;
+    } else {
+      c.sourcePaperId = ragSourcePaperId;
+    }
+
     return c;
   }
 
@@ -234,12 +248,46 @@ export class ChatService {
   async getMessageHistory(userId: string, conversationId: string) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
+      include: {
+        // Include conversationPapers for multi-paper citation mapping
+        conversationPapers: {
+          include: {
+            paper: {
+              select: {
+                id: true,
+                ragFileId: true,
+                fileName: true,
+                fileUrl: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!conversation) {
       throw new ForbiddenException(
         'Conversation not found or not owned by user',
       );
+    }
+
+    // Build ragFileId -> paperId mapping for multi-paper citations
+    const ragFileIdToPaperId = new Map<string, string>();
+    const paperInfoMap = new Map<
+      string,
+      { fileName: string; fileUrl: string | null }
+    >();
+
+    if (conversation.conversationPapers?.length > 0) {
+      for (const cp of conversation.conversationPapers) {
+        if (cp.paper.ragFileId) {
+          ragFileIdToPaperId.set(cp.paper.ragFileId, cp.paper.id);
+          paperInfoMap.set(cp.paper.id, {
+            fileName: cp.paper.fileName,
+            fileUrl: cp.paper.fileUrl,
+          });
+        }
+      }
     }
 
     const messages = await this.prisma.message.findMany({
@@ -273,7 +321,20 @@ export class ChatService {
       if (msg.role === 'ASSISTANT' && msg.context) {
         const context = msg.context as any;
         const rawCitations = this.extractCitationsFromContext(context);
-        base.citations = rawCitations.map((c: any) => this.mapCitation(c));
+        // Pass the mapping for multi-paper citations
+        base.citations = rawCitations.map((c: any) => {
+          const citation = this.mapCitation(c, ragFileIdToPaperId);
+          // Enrich with paper info
+          if (
+            citation.sourcePaperId &&
+            paperInfoMap.has(citation.sourcePaperId)
+          ) {
+            const paperInfo = paperInfoMap.get(citation.sourcePaperId)!;
+            citation.sourcePaperTitle = paperInfo.fileName;
+            citation.sourceFileUrl = paperInfo.fileUrl;
+          }
+          return citation;
+        });
       }
 
       return base;
@@ -430,5 +491,229 @@ export class ChatService {
     response.data = result;
 
     return response;
+  }
+
+  /**
+   * Ask a question across multiple papers
+   */
+  async askMultiPaper(
+    userId: string,
+    dto: {
+      paperIds: string[];
+      question: string;
+      conversationId?: string;
+    },
+  ) {
+    const { paperIds, question, conversationId } = dto;
+
+    // 1. Verify all papers belong to user and have ragFileId
+    const papers = await this.prisma.paper.findMany({
+      where: {
+        id: { in: paperIds },
+        userId,
+      },
+    });
+
+    if (papers.length !== paperIds.length) {
+      throw new ForbiddenException(
+        'Some papers not found or not owned by user',
+      );
+    }
+
+    const fileIds: string[] = [];
+    const paperTitles: Record<string, string> = {};
+    // Map ragFileId -> paperId for citation mapping
+    const ragFileIdToPaperId = new Map<string, string>();
+    // Map paperId -> paper info for citation enrichment
+    const paperInfoMap = new Map<
+      string,
+      { fileName: string; fileUrl: string | null; ragFileId: string }
+    >();
+
+    for (const paper of papers) {
+      if (!paper.ragFileId) {
+        throw new BadRequestException(
+          `Paper "${paper.fileName}" has not been processed by RAG system`,
+        );
+      }
+      fileIds.push(paper.ragFileId);
+      paperTitles[paper.ragFileId] = paper.fileName;
+      ragFileIdToPaperId.set(paper.ragFileId, paper.id);
+      paperInfoMap.set(paper.id, {
+        fileName: paper.fileName,
+        fileUrl: paper.fileUrl,
+        ragFileId: paper.ragFileId,
+      });
+    }
+
+    // 2. Handle conversation - ONE persistent multi-paper conversation per user
+    let actualConversationId = conversationId;
+
+    if (!actualConversationId) {
+      // Try to find existing multi-paper conversation for this user
+      const existingConv = await this.prisma.conversation.findFirst({
+        where: {
+          userId,
+          type: ConversationType.MULTI_PAPER,
+        },
+        orderBy: { updatedAt: 'desc' }, // Get the most recent one
+      });
+
+      if (existingConv) {
+        // Reuse existing multi-paper conversation
+        actualConversationId = existingConv.id;
+
+        // Update ConversationPaper entries to reflect current paper selection
+        // First, get existing paper IDs in conversation
+        const existingPaperIds = await this.prisma.conversationPaper.findMany({
+          where: { conversationId: existingConv.id },
+          select: { paperId: true },
+        });
+        const existingPaperIdSet = new Set(
+          existingPaperIds.map((p) => p.paperId),
+        );
+
+        // Add new papers that aren't already in the conversation
+        const newPaperEntries = paperIds
+          .filter((pid) => !existingPaperIdSet.has(pid))
+          .map((paperId, index) => ({
+            conversationId: existingConv.id,
+            paperId,
+            orderIndex: existingPaperIds.length + index,
+          }));
+
+        if (newPaperEntries.length > 0) {
+          await this.prisma.conversationPaper.createMany({
+            data: newPaperEntries,
+          });
+        }
+
+        // Update conversation title to reflect current papers
+        await this.prisma.conversation.update({
+          where: { id: existingConv.id },
+          data: {
+            title: `Multi-paper: ${papers
+              .map((p) => p.fileName)
+              .join(', ')
+              .substring(0, 100)}`,
+          },
+        });
+      } else {
+        // Create a new multi-paper conversation (first time for this user)
+        const conv = await this.prisma.conversation.create({
+          data: {
+            userId,
+            paperId: paperIds[0], // Use first paper as primary reference (for backwards compatibility)
+            type: ConversationType.MULTI_PAPER,
+            title: `Multi-paper: ${papers
+              .map((p) => p.fileName)
+              .join(', ')
+              .substring(0, 100)}`,
+          },
+        });
+        actualConversationId = conv.id;
+
+        // Create ConversationPaper entries for all papers in the conversation
+        await this.prisma.conversationPaper.createMany({
+          data: paperIds.map((paperId, index) => ({
+            conversationId: conv.id,
+            paperId,
+            orderIndex: index,
+          })),
+        });
+      }
+    }
+
+    // 3. Create user message
+    const userMessage = await this.prisma.message.create({
+      data: {
+        conversationId: actualConversationId,
+        role: MessageRole.USER,
+        content: question,
+      },
+    });
+
+    // 4. Call RAG service with multi-query endpoint
+    let ragResponse: any;
+    try {
+      const res = await this.http.axiosRef.post(
+        `${this.ragServiceUrl}/query-multi`,
+        {
+          file_ids: fileIds,
+          question,
+        },
+      );
+      ragResponse = res.data;
+    } catch (error) {
+      await this.prisma.message.create({
+        data: {
+          conversationId: actualConversationId,
+          role: MessageRole.ASSISTANT,
+          content: 'Sorry, I encountered an error processing your question.',
+        },
+      });
+      throw error;
+    }
+
+    const answerText = ragResponse.answer || '';
+    const rawCitations = this.extractCitationsFromContext(ragResponse.context);
+
+    // 5. Create assistant message
+    const assistantMessage = await this.prisma.message.create({
+      data: {
+        conversationId: actualConversationId,
+        role: MessageRole.ASSISTANT,
+        content: answerText,
+        context: (ragResponse.context as any) || {},
+      },
+    });
+
+    // 6. Map citations with source paper info
+    const mappedCitations = rawCitations.map((c: any) => {
+      const citation = this.mapCitation(c, ragFileIdToPaperId);
+      // Enrich citation with paper file URL for frontend navigation
+      if (citation.sourcePaperId && paperInfoMap.has(citation.sourcePaperId)) {
+        const paperInfo = paperInfoMap.get(citation.sourcePaperId)!;
+        citation.sourcePaperTitle = paperInfo.fileName;
+        citation.sourceFileUrl = paperInfo.fileUrl;
+      }
+      return citation;
+    });
+
+    // 7. Map sources to paper info
+    const sources = (ragResponse.sources || []).map((s: any) => {
+      const paperId = ragFileIdToPaperId.get(s.paper_id) || s.paper_id;
+      const paperInfo = paperInfoMap.get(paperId);
+      return {
+        paperId,
+        title: s.title || paperTitles[s.paper_id] || 'Unknown Paper',
+        fileUrl: paperInfo?.fileUrl || null,
+      };
+    });
+
+    // 8. Get all papers in conversation for response
+    const conversationPapers = paperIds.map((id, index) => {
+      const paperInfo = paperInfoMap.get(id);
+      return {
+        paperId: id,
+        orderIndex: index,
+        fileName: paperInfo?.fileName || 'Unknown',
+        fileUrl: paperInfo?.fileUrl || null,
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Multi-paper answer generated',
+      data: {
+        answer: answerText,
+        citations: mappedCitations,
+        sources,
+        conversationPapers, // Include all papers in conversation
+        assistantMessageId: assistantMessage.id,
+        userMessageId: userMessage.id,
+        conversationId: actualConversationId,
+      },
+    };
   }
 }

@@ -10,6 +10,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ChatService } from './chat.service';
 import { AskQuestionRequestDto } from './dto/ask-question-request.dto';
 import { AskQuestionResponseDto } from './dto/ask-question-response.dto';
+import {
+  AskMultiPaperRequestDto,
+  AskMultiPaperResponseDto,
+} from './dto/ask-multi-paper-request.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ExplainRegionRequestDto } from './dto/explain-region-request.dto';
 
@@ -28,6 +32,16 @@ export class ChatController {
     @Body() dto: AskQuestionRequestDto,
   ): Promise<AskQuestionResponseDto> {
     return this.chatService.askQuestion(user.id, dto);
+  }
+
+  @Post('ask-multi')
+  @ApiOperation({ summary: 'Ask a question across multiple papers' })
+  @ApiOkResponse({ type: AskMultiPaperResponseDto })
+  askMultiPaper(
+    @CurrentUser() user: any,
+    @Body() dto: AskMultiPaperRequestDto,
+  ) {
+    return this.chatService.askMultiPaper(user.id, dto);
   }
 
   @Get('messages/:conversationId')

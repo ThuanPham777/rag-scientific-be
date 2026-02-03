@@ -31,6 +31,21 @@ export class ChatCitationDto {
 
   @ApiPropertyOptional({ description: 'Layout height' })
   layoutHeight?: number;
+
+  @ApiPropertyOptional({
+    description: 'Source paper ID (for multi-paper chat)',
+  })
+  sourcePaperId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Source paper title (for multi-paper chat)',
+  })
+  sourcePaperTitle?: string;
+
+  @ApiPropertyOptional({
+    description: 'Source file URL (for multi-paper chat navigation)',
+  })
+  sourceFileUrl?: string;
 }
 
 export class AskQuestionResultDto {

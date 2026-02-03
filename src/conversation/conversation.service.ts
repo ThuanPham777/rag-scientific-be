@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ConversationType } from '@prisma/client';
 import { CreateConversationRequestDto } from './dto/create-conversation-request.dto';
 import {
   CreateConversationResponseDto,
@@ -21,6 +22,7 @@ export class ConversationService {
     dto.paperId = c.paperId;
     dto.userId = c.userId;
     dto.title = c.title ?? null;
+    dto.type = c.type ?? 'SINGLE_PAPER';
     dto.createdAt = c.createdAt;
     dto.updatedAt = c.updatedAt;
     return dto;
@@ -44,10 +46,12 @@ export class ConversationService {
       throw new ForbiddenException('Paper not found or not owned by user');
     }
 
+    // Always create as SINGLE_PAPER type (multi-paper conversations are created via chat.service)
     const conv = await this.prisma.conversation.create({
       data: {
         userId,
         paperId: paper.id,
+        type: ConversationType.SINGLE_PAPER,
         title: dto.title ?? paper.title ?? 'New conversation',
       },
     });
@@ -62,8 +66,20 @@ export class ConversationService {
   async listConversations(
     userId: string,
     paperId?: string,
+    type?: ConversationType,
   ): Promise<ListConversationsResponseDto> {
     const whereClause: any = { userId };
+
+    // Default to SINGLE_PAPER if no type specified (backward compatibility)
+    // This ensures multi-paper conversations don't appear in single-paper chat lists
+    if (type) {
+      whereClause.type = type;
+    } else {
+      // If paperId is specified, only show single-paper conversations for that paper
+      if (paperId) {
+        whereClause.type = ConversationType.SINGLE_PAPER;
+      }
+    }
 
     if (paperId) {
       // Support both id and ragFileId
@@ -109,7 +125,28 @@ export class ConversationService {
           orderBy: { createdAt: 'asc' },
         },
         paper: {
-          select: { ragFileId: true, title: true, fileUrl: true },
+          select: {
+            id: true,
+            ragFileId: true,
+            title: true,
+            fileUrl: true,
+            fileName: true,
+          },
+        },
+        // Include all papers for multi-paper conversations
+        conversationPapers: {
+          include: {
+            paper: {
+              select: {
+                id: true,
+                ragFileId: true,
+                title: true,
+                fileUrl: true,
+                fileName: true,
+              },
+            },
+          },
+          orderBy: { orderIndex: 'asc' },
         },
       },
     });
@@ -117,6 +154,30 @@ export class ConversationService {
     if (!conv) {
       throw new NotFoundException('Conversation not found');
     }
+
+    // Build papers array for multi-paper conversations
+    const papers =
+      conv.conversationPapers?.length > 0
+        ? conv.conversationPapers.map((cp) => ({
+            id: cp.paper.id,
+            ragFileId: cp.paper.ragFileId,
+            title: cp.paper.title,
+            fileName: cp.paper.fileName,
+            fileUrl: cp.paper.fileUrl,
+            orderIndex: cp.orderIndex,
+          }))
+        : conv.paper
+          ? [
+              {
+                id: conv.paper.id,
+                ragFileId: conv.paper.ragFileId,
+                title: conv.paper.title,
+                fileName: conv.paper.fileName,
+                fileUrl: conv.paper.fileUrl,
+                orderIndex: 0,
+              },
+            ]
+          : [];
 
     return {
       success: true,
@@ -126,6 +187,8 @@ export class ConversationService {
         ragFileId: conv.paper?.ragFileId,
         paperTitle: conv.paper?.title,
         paperUrl: conv.paper?.fileUrl,
+        // Include papers array for multi-paper support
+        papers,
         messages: conv.messages.map((m) => ({
           id: m.id,
           role: m.role,

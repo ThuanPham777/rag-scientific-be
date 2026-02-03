@@ -14,6 +14,12 @@ export class ConversationItemDto {
   @ApiPropertyOptional()
   title?: string;
 
+  @ApiProperty({
+    description: 'Type of conversation',
+    enum: ['SINGLE_PAPER', 'MULTI_PAPER'],
+  })
+  type?: string;
+
   @ApiProperty()
   createdAt: Date;
 
