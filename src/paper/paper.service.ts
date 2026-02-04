@@ -1,15 +1,22 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3Service } from '../upload/s3.service';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { PaperItemDto } from './dto/create-paper-response.dto';
 
 @Injectable()
 export class PaperService {
+  private readonly logger = new Logger(PaperService.name);
+  private readonly ragUrl: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly http: HttpService,
-  ) {}
+    private readonly s3Service: S3Service,
+  ) {
+    this.ragUrl = process.env.RAG_SERVICE_URL ?? 'http://127.0.0.1:8000';
+  }
 
   private mapToPaperItem(p: any): PaperItemDto {
     const dto = new PaperItemDto();
@@ -72,9 +79,8 @@ export class PaperService {
       });
 
       // Call RAG service - Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-      const ragUrl = process.env.RAG_SERVICE_URL ?? 'http://127.0.0.1:8000';
       const response = await this.http.axiosRef.post(
-        `${ragUrl}/ingest-from-url`,
+        `${this.ragUrl}/ingest-from-url`,
         {
           file_url: fileUrl,
           file_id: ragFileId,
@@ -155,7 +161,10 @@ export class PaperService {
   }
 
   /**
-   * Delete a paper
+   * Delete a paper and cleanup all associated resources
+   * - Deletes from database (cascades to conversations, messages, etc.)
+   * - Deletes file from S3
+   * - Calls RAG service to cleanup vector store and caches
    */
   async deletePaper(userId: string, id: string): Promise<void> {
     const paper = await this.prisma.paper.findFirst({
@@ -166,6 +175,39 @@ export class PaperService {
       throw new NotFoundException('Paper not found');
     }
 
+    // 1. Delete from database (cascades to related tables)
     await this.prisma.paper.delete({ where: { id } });
+
+    // 2. Delete file from S3 (async, don't block)
+    this.deleteS3File(paper.fileUrl);
+
+    // 3. Call RAG to cleanup vector store and caches (async, don't block)
+    this.cleanupRagData(paper.ragFileId);
+  }
+
+  /**
+   * Delete S3 file in background
+   */
+  private async deleteS3File(fileUrl: string): Promise<void> {
+    try {
+      const deleted = await this.s3Service.deleteFile(fileUrl);
+      if (deleted) {
+        this.logger.log(`Deleted S3 file: ${fileUrl}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to delete S3 file: ${fileUrl}`, error);
+    }
+  }
+
+  /**
+   * Call RAG service to cleanup vector store and caches
+   */
+  private async cleanupRagData(ragFileId: string): Promise<void> {
+    try {
+      await this.http.axiosRef.delete(`${this.ragUrl}/cleanup/${ragFileId}`);
+      this.logger.log(`RAG cleanup completed for: ${ragFileId}`);
+    } catch (error) {
+      this.logger.error(`RAG cleanup failed for: ${ragFileId}`, error);
+    }
   }
 }

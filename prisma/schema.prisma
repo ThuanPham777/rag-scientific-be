@@ -1,7 +1,21 @@
 // ============================================================================
-// SIMPLIFIED DATABASE SCHEMA FOR RAG SCIENTIFIC
-// Designed to work directly with RAG_BE_02
+// RAG SCIENTIFIC - DATABASE SCHEMA
+//
+// This is the canonical, production-ready schema for the entire system.
 // Database: PostgreSQL with Prisma
+//
+// ARCHITECTURE:
+// - Single PostgreSQL database shared by both services
+// - Backend (rag-scientific-be) owns: users, papers, conversations, etc.
+// - RAG service (RAG_BE_02) owns: rag_paper_cache, paper_content_summaries
+// - Coordination via `rag_file_id` UUID
+//
+// DESIGN PRINCIPLES:
+// - Single source of truth: `papers` table owns ALL paper metadata
+// - No data duplication between services
+// - RAG tables are minimal (cache only, no metadata duplication)
+//
+// TABLE NAMING: snake_case for all tables and columns
 // ============================================================================
 
 generator client {
@@ -14,7 +28,36 @@ datasource db {
 }
 
 // ============================================================================
-// SECTION 1: USER MANAGEMENT (with OAuth Support)
+// RAG SERVICE TABLES (documented here, managed by this schema)
+// ============================================================================
+//
+// Table: rag_paper_cache
+// Purpose: Minimal RAG processing cache (file hash for rebuild detection)
+// Owner: RAG_BE_02
+// Note: Does NOT store metadata - that's in `papers` table
+//
+// Columns:
+// - rag_paper_id VARCHAR(100) PRIMARY KEY  -- Links to papers.rag_file_id
+// - file_content_hash VARCHAR(64)          -- Hash for rebuild detection
+// - last_processed_at TIMESTAMPTZ          -- When last processed
+// - created_at TIMESTAMPTZ
+//
+// Table: paper_content_summaries
+// Purpose: Cache LLM-generated summaries for tables and images
+// Owner: RAG_BE_02
+//
+// Columns:
+// - id SERIAL PRIMARY KEY
+// - rag_paper_id VARCHAR(100)              -- Links to rag_paper_cache
+// - content_type VARCHAR(20)               -- 'table' or 'image'
+// - content_index INTEGER                  -- Position in extraction order
+// - content_hash VARCHAR(64)               -- Hash for cache invalidation
+// - summary_text TEXT                      -- The LLM-generated summary
+// - created_at TIMESTAMPTZ
+// ============================================================================
+
+// ============================================================================
+// SECTION 1: USER MANAGEMENT
 // ============================================================================
 
 enum AuthProvider {
@@ -32,7 +75,7 @@ model User {
 
   // === OAuth Support ===
   provider      AuthProvider @default(LOCAL)
-  providerId    String?      @map("provider_id") @db.VarChar(255)  // Google sub/id
+  providerId    String?      @map("provider_id") @db.VarChar(255)
 
   // === Profile ===
   displayName   String?      @map("display_name") @db.VarChar(100)
@@ -52,13 +95,13 @@ model User {
   refreshTokens RefreshToken[]
   folders       Folder[]
 
-  @@unique([provider, providerId]) // Ensure unique OAuth accounts
+  @@unique([provider, providerId])
   @@index([email])
   @@map("users")
 }
 
 // ============================================================================
-// SECTION 1.5: REFRESH TOKEN (JWT Auth)
+// SECTION 2: REFRESH TOKENS
 // ============================================================================
 
 /// Refresh token for JWT authentication
@@ -66,12 +109,12 @@ model RefreshToken {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId      String   @map("user_id") @db.Uuid
 
-  token       String   @unique @db.VarChar(500)              // Hashed refresh token
-  deviceInfo  String?  @map("device_info") @db.VarChar(500)  // Browser/device info
-  ipAddress   String?  @map("ip_address") @db.VarChar(50)    // IP address
+  token       String   @unique @db.VarChar(500)
+  deviceInfo  String?  @map("device_info") @db.VarChar(500)
+  ipAddress   String?  @map("ip_address") @db.VarChar(50)
 
-  expiresAt   DateTime @map("expires_at") @db.Timestamptz    // Token expiration
-  isRevoked   Boolean  @default(false) @map("is_revoked")    // Manual revoke
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz
+  isRevoked   Boolean  @default(false) @map("is_revoked")
 
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
@@ -85,7 +128,7 @@ model RefreshToken {
 }
 
 // ============================================================================
-// SECTION 2: FOLDER MANAGEMENT (My Library)
+// SECTION 3: FOLDER MANAGEMENT
 // ============================================================================
 
 /// Folder - organize papers in user's library
@@ -93,12 +136,9 @@ model Folder {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId      String   @map("user_id") @db.Uuid
 
-  name        String   @db.VarChar(100)                         // Folder name
+  name        String   @db.VarChar(100)
+  orderIndex  Int      @default(0) @map("order_index")
 
-  // === Ordering ===
-  orderIndex  Int      @default(0) @map("order_index")          // For custom ordering
-
-  // === Timestamps ===
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -106,61 +146,63 @@ model Folder {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   papers      Paper[]
 
-  @@unique([userId, name])  // Unique folder name per user
+  @@unique([userId, name])
   @@index([userId])
   @@index([orderIndex])
   @@map("folders")
 }
 
 // ============================================================================
-// SECTION 3: PAPER MANAGEMENT
-// Maps directly to RAG_BE_02's file_id concept
+// SECTION 4: PAPERS (SINGLE SOURCE OF TRUTH)
+//
+// This is THE authoritative table for all paper data.
+// - Backend owns this table
+// - RAG service reads from this table when it needs paper metadata
+// - NO duplication of metadata in RAG tables
 // ============================================================================
 
-/// Paper/PDF document - core entity linking to RAG service
+/// Paper/PDF document - SINGLE SOURCE OF TRUTH for all paper data
 model Paper {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String      @map("user_id") @db.Uuid
-  folderId        String?     @map("folder_id") @db.Uuid              // Optional folder
+  folderId        String?     @map("folder_id") @db.Uuid
 
-  // === File Storage (Cloud) ===
-  fileName        String      @map("file_name") @db.VarChar(255)      // Original filename
-  fileUrl         String      @map("file_url") @db.VarChar(1000)      // S3/Cloud URL
-  fileSize        BigInt?     @map("file_size")                        // File size in bytes
-  fileHash        String?     @map("file_hash") @db.VarChar(64)       // MD5 hash for dedup
+  // === File Storage (Cloud) - SINGLE SOURCE FOR URL ===
+  fileName        String      @map("file_name") @db.VarChar(255)
+  fileUrl         String      @map("file_url") @db.VarChar(1000)  // S3 URL
+  fileSize        BigInt?     @map("file_size")
+  fileHash        String?     @map("file_hash") @db.VarChar(64)   // For deduplication
 
   // === RAG Service Integration ===
-  // This is the key field - maps to file_id in RAG_BE_02
   ragFileId       String      @unique @map("rag_file_id") @db.VarChar(100)
 
-  // === Metadata from RAG ingestion ===
-  title           String?     @db.VarChar(500)                        // From GROBID
-  abstract        String?     @db.Text                                // From GROBID
-  authors         String?     @db.Text                                // JSON array string
+  // === Metadata (extracted by RAG, stored here as source of truth) ===
+  title           String?     @db.VarChar(500)
+  abstract        String?     @db.Text
+  authors         String?     @db.Text  // JSON array string
   numPages        Int?        @map("num_pages")
 
   // === Processing Status ===
-  // Maps to processing_status in RAG_BE_02
   status          PaperStatus @default(PENDING)
   errorMessage    String?     @map("error_message") @db.Text
 
-  // === Ingestion Stats (from IngestionResult) ===
+  // === Ingestion Statistics ===
   nodeCount       Int?        @map("node_count")
   tableCount      Int?        @map("table_count")
   imageCount      Int?        @map("image_count")
 
   // === Timestamps ===
-  processedAt     DateTime?   @map("processed_at") @db.Timestamptz   // When RAG finished
+  processedAt     DateTime?   @map("processed_at") @db.Timestamptz
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  folder          Folder?     @relation(fields: [folderId], references: [id], onDelete: Cascade)
-  conversations   Conversation[]
-  conversationPapers ConversationPaper[]  // For multi-paper conversations
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder             Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  conversations      Conversation[]
+  conversationPapers ConversationPaper[]
   suggestedQuestions SuggestedQuestion[]
-  relatedPapers   RelatedPaper[]
+  relatedPapers      RelatedPaper[]
 
   @@index([userId])
   @@index([folderId])
@@ -177,32 +219,31 @@ enum PaperStatus {
 }
 
 // ============================================================================
-// SECTION 3: CONVERSATION & CHAT HISTORY
+// SECTION 5: CONVERSATIONS & MESSAGES
 // ============================================================================
 
-/// Conversation type - distinguishes single-paper from multi-paper chats
 enum ConversationType {
-  SINGLE_PAPER  // Chat with one specific paper
-  MULTI_PAPER   // Chat across multiple papers
+  SINGLE_PAPER
+  MULTI_PAPER
 }
 
-/// Conversation - chat session with a paper
+/// Conversation - chat session with papers
 model Conversation {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  paperId       String   @map("paper_id") @db.Uuid
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String           @map("user_id") @db.Uuid
+  paperId       String           @map("paper_id") @db.Uuid
 
-  title         String?  @db.VarChar(300)                           // Auto-generated or user-set
-  type          ConversationType @default(SINGLE_PAPER)             // Type of conversation
+  title         String?          @db.VarChar(300)
+  type          ConversationType @default(SINGLE_PAPER)
 
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
-  messages      Message[]
-  conversationPapers ConversationPaper[]  // For multi-paper conversations
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paper              Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  messages           Message[]
+  conversationPapers ConversationPaper[]
 
   @@index([userId])
   @@index([paperId])
@@ -212,12 +253,11 @@ model Conversation {
 }
 
 /// ConversationPaper - Join table for multi-paper conversations
-/// Stores which papers are included in a multi-paper conversation
 model ConversationPaper {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId  String   @map("conversation_id") @db.Uuid
   paperId         String   @map("paper_id") @db.Uuid
-  orderIndex      Int      @default(0) @map("order_index")          // Order of paper in conversation
+  orderIndex      Int      @default(0) @map("order_index")
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
@@ -225,27 +265,32 @@ model ConversationPaper {
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   paper           Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
-  @@unique([conversationId, paperId])  // Each paper can only be added once per conversation
+  @@unique([conversationId, paperId])
   @@index([conversationId])
   @@index([paperId])
   @@map("conversation_papers")
 }
 
-/// Message - individual chat message (user question or AI answer)
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+/// Message - individual chat message
 model Message {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId  String      @map("conversation_id") @db.Uuid
 
-  role            MessageRole                                       // USER or ASSISTANT
-  content         String      @db.Text                              // Question or Answer
+  role            MessageRole
+  content         String      @db.Text
 
-  // === For USER messages with image (explain region feature) ===
-  imageUrl        String?     @map("image_url") @db.VarChar(1000)   // S3 URL of cropped region image
+  // For USER messages with image
+  imageUrl        String?     @map("image_url") @db.VarChar(1000)
 
-  // === For ASSISTANT messages - RAG response metadata ===
-  modelName       String?     @map("model_name") @db.VarChar(100)   // Model used for generation
-  tokenCount      Int?        @map("token_count")                    // Token count for response
-  context         Json?       @default("{}") @db.JsonB              // Retrieved context from RAG (texts, tables, images)
+  // For ASSISTANT messages - RAG metadata
+  modelName       String?     @map("model_name") @db.VarChar(100)
+  tokenCount      Int?        @map("token_count")
+  context         Json?       @default("{}") @db.JsonB
 
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
@@ -257,13 +302,8 @@ model Message {
   @@map("messages")
 }
 
-enum MessageRole {
-  USER
-  ASSISTANT
-}
-
 // ============================================================================
-// SECTION 4: SUGGESTED QUESTIONS (Brainstorm feature)
+// SECTION 6: SUGGESTED QUESTIONS
 // ============================================================================
 
 /// Cached suggested questions for a paper
@@ -284,35 +324,31 @@ model SuggestedQuestion {
 }
 
 // ============================================================================
-// SECTION 5: RELATED PAPERS CACHE
-// Cache results from RAG /related-papers endpoint
+// SECTION 7: RELATED PAPERS
 // ============================================================================
 
-/// Cached related paper from arXiv (via RAG service)
+/// Cached related paper from arXiv
 model RelatedPaper {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paperId       String   @map("paper_id") @db.Uuid          // Source paper
+  paperId       String   @map("paper_id") @db.Uuid
 
-  // === arXiv Paper Info ===
   arxivId       String   @map("arxiv_id") @db.VarChar(50)
   title         String   @db.VarChar(500)
   abstract      String   @db.Text
-  authors       String[] @db.VarChar(255)                    // Array of author names
-  categories    String[] @db.VarChar(50)                     // arXiv categories
+  authors       String[] @db.VarChar(255)
+  categories    String[] @db.VarChar(50)
   url           String   @db.VarChar(500)
 
-  // === Relevance ===
-  score         Float                                        // Similarity score (0-1)
-  reason        String   @db.Text                            // Why it's relevant
+  score         Float
+  reason        String   @db.Text
 
-  // === Cache Control ===
-  orderIndex    Int      @map("order_index")                 // Display order
+  orderIndex    Int      @map("order_index")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
 
-  @@unique([paperId, arxivId])  // One entry per related paper per source
+  @@unique([paperId, arxivId])
   @@index([paperId])
   @@map("related_papers")
 }

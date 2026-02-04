@@ -1,14 +1,13 @@
+// src/cleanup/cleanup.module.ts
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
-import { PaperController } from './paper.controller';
-import { PaperService } from './paper.service';
+import { CleanupService } from './cleanup.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { UploadModule } from '../upload/upload.module';
 
 @Module({
   imports: [PrismaModule, HttpModule, UploadModule],
-  controllers: [PaperController],
-  providers: [PaperService],
-  exports: [PaperService],
+  providers: [CleanupService],
+  exports: [CleanupService],
 })
-export class PaperModule {}
+export class CleanupModule {}
