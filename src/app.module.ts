@@ -11,6 +11,7 @@ import { ChatModule } from './chat/chat.module';
 import { FolderModule } from './folder/folder.module';
 import { GuestModule } from './guest/guest.module';
 import { CleanupModule } from './cleanup/cleanup.module';
+import { HighlightModule } from './highlight/highlight.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CleanupModule } from './cleanup/cleanup.module';
     FolderModule,
     GuestModule,
     CleanupModule,
+    HighlightModule,
   ],
 })
 export class AppModule {}
