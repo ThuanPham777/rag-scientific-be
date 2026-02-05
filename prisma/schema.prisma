@@ -90,10 +90,12 @@ model User {
   updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  papers        Paper[]
-  conversations Conversation[]
-  refreshTokens RefreshToken[]
-  folders       Folder[]
+  papers            Paper[]
+  conversations     Conversation[]
+  refreshTokens     RefreshToken[]
+  folders           Folder[]
+  highlights        Highlight[]
+  highlightComments HighlightComment[]
 
   @@unique([provider, providerId])
   @@index([email])
@@ -203,6 +205,7 @@ model Paper {
   conversationPapers ConversationPaper[]
   suggestedQuestions SuggestedQuestion[]
   relatedPapers      RelatedPaper[]
+  highlights         Highlight[]
 
   @@index([userId])
   @@index([folderId])
@@ -352,3 +355,76 @@ model RelatedPaper {
   @@index([paperId])
   @@map("related_papers")
 }
+
+// ============================================================================
+// SECTION 8: HIGHLIGHTS & ANNOTATIONS
+// ============================================================================
+
+/// Highlight color options for text selections
+enum HighlightColor {
+  YELLOW
+  GREEN
+  BLUE
+  PINK
+  ORANGE
+}
+
+/// Highlight - text selection annotation on a PDF page
+model Highlight {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paperId         String          @map("paper_id") @db.Uuid
+  userId          String          @map("user_id") @db.Uuid
+
+  // === Page Location ===
+  pageNumber      Int             @map("page_number")
+
+  // === Selection Metadata (for re-rendering) ===
+  // Stores PDF.js text layer selection data
+  // Format: [{ x: number, y: number, width: number, height: number }]
+  selectionRects  Json            @map("selection_rects") @db.JsonB
+
+  // Text content of the highlight (for search/display)
+  selectedText    String          @map("selected_text") @db.Text
+
+  // === Optional text anchor for fallback re-rendering ===
+  textPrefix      String?         @map("text_prefix") @db.VarChar(100)
+  textSuffix      String?         @map("text_suffix") @db.VarChar(100)
+
+  // === Styling ===
+  color           HighlightColor  @default(YELLOW)
+
+  // === Timestamps ===
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  paper           Paper           @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments        HighlightComment[]
+
+  @@index([paperId])
+  @@index([userId])
+  @@index([paperId, pageNumber])
+  @@map("highlights")
+}
+
+/// Comment on a highlight
+model HighlightComment {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  highlightId     String    @map("highlight_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+
+  content         String    @db.Text
+
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  highlight       Highlight @relation(fields: [highlightId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([highlightId])
+  @@index([userId])
+  @@map("highlight_comments")
+}
+
