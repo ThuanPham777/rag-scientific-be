@@ -165,6 +165,32 @@ export class ChatService {
   }
 
   /**
+   * Clean up context before storing in database
+   * Removes heavy data like image_b64 to reduce DB size
+   */
+  private cleanContextForStorage(context?: RagContext): RagContext {
+    if (!context) return {};
+
+    return {
+      ...context,
+      // Remove image_b64 from images array to save DB space
+      images: context.images?.map((img) => {
+        const { image_b64, ...rest } = img;
+        return rest;
+      }),
+      // Also clean any image_b64 in texts or tables if present
+      texts: context.texts?.map((item) => {
+        const { image_b64, ...rest } = item;
+        return rest;
+      }),
+      tables: context.tables?.map((item) => {
+        const { image_b64, ...rest } = item;
+        return rest;
+      }),
+    };
+  }
+
+  /**
    * Ask a question about a paper
    * @returns Raw question result
    */
@@ -236,7 +262,7 @@ export class ChatService {
         content: answerText,
         modelName,
         tokenCount,
-        context: (ragResponse.context as any) || {},
+        context: this.cleanContextForStorage(ragResponse.context) as any,
       },
     });
 
@@ -486,7 +512,7 @@ export class ChatService {
         conversationId,
         role: MessageRole.ASSISTANT,
         content: ragResponse.answer || '',
-        context: (ragResponse.context as any) || {},
+        context: this.cleanContextForStorage(ragResponse.context) as any,
       },
     });
 
@@ -675,7 +701,7 @@ export class ChatService {
         conversationId: actualConversationId,
         role: MessageRole.ASSISTANT,
         content: answerText,
-        context: (ragResponse.context as any) || {},
+        context: this.cleanContextForStorage(ragResponse.context) as any,
       },
     });
 
