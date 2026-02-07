@@ -1,9 +1,9 @@
 // src/cleanup/cleanup.service.ts
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
+import { RagService } from '../rag';
 
 /**
  * Cleanup Service - Handles periodic cleanup tasks
@@ -17,15 +17,13 @@ import { S3Service } from '../upload/s3.service';
 @Injectable()
 export class CleanupService implements OnModuleInit {
   private readonly logger = new Logger(CleanupService.name);
-  private readonly ragUrl: string;
   private readonly guestFileTtlHours: number;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly http: HttpService,
+    private readonly ragService: RagService,
     private readonly s3Service: S3Service,
   ) {
-    this.ragUrl = process.env.RAG_SERVICE_URL ?? 'http://127.0.0.1:8000';
     this.guestFileTtlHours = parseInt(
       process.env.GUEST_FILE_TTL_HOURS ?? '24',
       10,
@@ -47,16 +45,10 @@ export class CleanupService implements OnModuleInit {
     this.logger.log('Starting guest file cleanup...');
 
     try {
-      // Call RAG service to get list of orphaned guest files
-      const response = await this.http.axiosRef.get(
-        `${this.ragUrl}/cleanup/orphaned-guests`,
-        {
-          params: { max_age_hours: this.guestFileTtlHours },
-        },
+      // Call RAG service to get list of orphaned guest files via centralized RagService
+      const orphanedFiles = await this.ragService.getOrphanedGuestFiles(
+        this.guestFileTtlHours,
       );
-
-      const orphanedFiles: { rag_paper_id: string; file_url?: string }[] =
-        response.data.files || [];
 
       if (orphanedFiles.length === 0) {
         this.logger.log('No orphaned guest files to cleanup');
@@ -70,10 +62,8 @@ export class CleanupService implements OnModuleInit {
       let cleaned = 0;
       for (const file of orphanedFiles) {
         try {
-          // 1. Delete from RAG (vector store, caches)
-          await this.http.axiosRef.delete(
-            `${this.ragUrl}/cleanup/${file.rag_paper_id}`,
-          );
+          // 1. Delete from RAG (vector store, caches) via centralized RagService
+          await this.ragService.cleanup(file.rag_paper_id);
 
           // 2. Delete from S3 if URL is provided
           if (file.file_url) {
@@ -121,20 +111,13 @@ export class CleanupService implements OnModuleInit {
     let guestFiles = 0;
 
     try {
-      const response = await this.http.axiosRef.get(
-        `${this.ragUrl}/cleanup/orphaned-guests`,
-        {
-          params: { max_age_hours: 1 }, // More aggressive for manual cleanup
-        },
-      );
-
-      const orphanedFiles = response.data.files || [];
+      // Get orphaned guest files via centralized RagService
+      const orphanedFiles = await this.ragService.getOrphanedGuestFiles(1); // More aggressive for manual cleanup
 
       for (const file of orphanedFiles) {
         try {
-          await this.http.axiosRef.delete(
-            `${this.ragUrl}/cleanup/${file.rag_paper_id}`,
-          );
+          // Cleanup via centralized RagService
+          await this.ragService.cleanup(file.rag_paper_id);
           if (file.file_url) {
             await this.s3Service.deleteFile(file.file_url);
           }

@@ -12,12 +12,14 @@ import { FolderModule } from './folder/folder.module';
 import { GuestModule } from './guest/guest.module';
 import { CleanupModule } from './cleanup/cleanup.module';
 import { HighlightModule } from './highlight/highlight.module';
+import { RagModule } from './rag/rag.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    RagModule,
     UsersModule,
     AuthModule,
     UploadModule,

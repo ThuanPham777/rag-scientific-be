@@ -5,9 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
+import { RagService, RagContext, RagContextItem } from '../rag';
 import { AskQuestionRequestDto } from './dto/ask-question-request.dto';
 import {
   AskQuestionResultDto,
@@ -21,54 +21,13 @@ import {
 import { MessageItemDto } from './dto/get-messages-response.dto';
 import { MessageRole, ConversationType } from '@prisma/client';
 
-interface RagContextItem {
-  source_id: string;
-  text: string;
-  type?: string;
-  page?: number;
-  metadata?: {
-    section_title?: string;
-    page_label?: number;
-    page_start?: number;
-    page_end?: number;
-    modality?: string;
-    bbox?: any;
-    layout_width?: number;
-    layout_height?: number;
-    [key: string]: any;
-  };
-  image_b64?: string;
-  table_html?: string;
-}
-
-interface RagContext {
-  texts?: RagContextItem[];
-  tables?: RagContextItem[];
-  images?: RagContextItem[];
-  // Legacy support
-  citations?: any[];
-  model_name?: string;
-  token_count?: number;
-  latency_ms?: number;
-}
-
-interface RagQueryResponse {
-  answer: string;
-  context?: RagContext;
-}
-
 @Injectable()
 export class ChatService {
-  private readonly ragServiceUrl: string;
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly http: HttpService,
+    private readonly ragService: RagService,
     private readonly s3Service: S3Service,
-  ) {
-    // Use 127.0.0.1 instead of localhost to avoid IPv6 issues on Windows
-    this.ragServiceUrl = process.env.RAG_SERVICE_URL || 'http://127.0.0.1:8000';
-  }
+  ) {}
 
   private mapCitation(
     raw: any,
@@ -113,84 +72,6 @@ export class ChatService {
   }
 
   /**
-   * Extract citations from RAG context (texts, tables, images)
-   */
-  private extractCitationsFromContext(context?: RagContext): any[] {
-    if (!context) return [];
-
-    // If RAG already provides citations array, use it
-    if (context.citations && Array.isArray(context.citations)) {
-      return context.citations;
-    }
-
-    // Otherwise, combine texts, tables, images into citations
-    const citations: any[] = [];
-
-    // Add texts
-    if (context.texts && Array.isArray(context.texts)) {
-      citations.push(
-        ...context.texts.map((t) => ({
-          ...t,
-          modality: 'text',
-        })),
-      );
-    }
-
-    // Add tables
-    if (context.tables && Array.isArray(context.tables)) {
-      citations.push(
-        ...context.tables.map((t) => ({
-          ...t,
-          modality: 'table',
-        })),
-      );
-    }
-
-    // Add images (without base64 to keep response size small)
-    if (context.images && Array.isArray(context.images)) {
-      citations.push(
-        ...context.images.map((img) => ({
-          source_id: img.source_id,
-          text: img.text,
-          type: img.type,
-          page: img.page,
-          metadata: img.metadata,
-          modality: 'image',
-          // Don't include image_b64 in response to save bandwidth
-        })),
-      );
-    }
-
-    return citations;
-  }
-
-  /**
-   * Clean up context before storing in database
-   * Removes heavy data like image_b64 to reduce DB size
-   */
-  private cleanContextForStorage(context?: RagContext): RagContext {
-    if (!context) return {};
-
-    return {
-      ...context,
-      // Remove image_b64 from images array to save DB space
-      images: context.images?.map((img) => {
-        const { image_b64, ...rest } = img;
-        return rest;
-      }),
-      // Also clean any image_b64 in texts or tables if present
-      texts: context.texts?.map((item) => {
-        const { image_b64, ...rest } = item;
-        return rest;
-      }),
-      tables: context.tables?.map((item) => {
-        const { image_b64, ...rest } = item;
-        return rest;
-      }),
-    };
-  }
-
-  /**
    * Ask a question about a paper
    * @returns Raw question result
    */
@@ -226,17 +107,13 @@ export class ChatService {
       },
     });
 
-    // 3. Call RAG service
-    let ragResponse: RagQueryResponse;
+    // 3. Call RAG service via centralized RagService
+    let ragResponse;
     try {
-      const res = await this.http.axiosRef.post<RagQueryResponse>(
-        `${this.ragServiceUrl}/query`,
-        {
-          file_id: conversation.paper.ragFileId,
-          question,
-        },
+      ragResponse = await this.ragService.query(
+        conversation.paper.ragFileId,
+        question,
       );
-      ragResponse = res.data;
     } catch (error) {
       // Create error message and throw
       await this.prisma.message.create({
@@ -250,7 +127,9 @@ export class ChatService {
     }
 
     const answerText = ragResponse.answer || '';
-    const rawCitations = this.extractCitationsFromContext(ragResponse.context);
+    const rawCitations = this.ragService.extractCitationsFromContext(
+      ragResponse.context,
+    );
     const modelName = ragResponse.context?.model_name || 'rag-model';
     const tokenCount = ragResponse.context?.token_count || 0;
 
@@ -262,7 +141,9 @@ export class ChatService {
         content: answerText,
         modelName,
         tokenCount,
-        context: this.cleanContextForStorage(ragResponse.context) as any,
+        context: this.ragService.cleanContextForStorage(
+          ragResponse.context,
+        ) as any,
       },
     });
 
@@ -366,7 +247,8 @@ export class ChatService {
       // Extract citations from context for assistant messages
       if (msg.role === 'ASSISTANT' && msg.context) {
         const context = msg.context as any;
-        const rawCitations = this.extractCitationsFromContext(context);
+        const rawCitations =
+          this.ragService.extractCitationsFromContext(context);
         // Pass the mapping for multi-paper citations
         base.citations = rawCitations.map((c: any) => {
           const citation = this.mapCitation(c, ragFileIdToPaperId);
@@ -475,26 +357,15 @@ export class ChatService {
       },
     });
 
-    // Strip data URL prefix if present (RAG API expects raw base64)
-    let rawBase64 = dto.imageBase64;
-    if (dto.imageBase64.includes(',')) {
-      rawBase64 = dto.imageBase64.split(',')[1];
-    }
-
-    // Call RAG explain-region endpoint
-    let ragResponse: RagQueryResponse;
+    // Call RAG explain-region endpoint via centralized RagService
+    let ragResponse;
     try {
-      const res = await this.http.axiosRef.post<RagQueryResponse>(
-        `${this.ragServiceUrl}/explain-region`,
-        {
-          file_id: conversation.paper.ragFileId,
-          image_b64: rawBase64,
-          page_number: dto.pageNumber,
-          question:
-            dto.question || 'Please analyze and explain this cropped region.',
-        },
+      ragResponse = await this.ragService.explainRegion(
+        conversation.paper.ragFileId,
+        dto.question || 'Please analyze and explain this cropped region.',
+        dto.imageBase64,
+        dto.pageNumber,
       );
-      ragResponse = res.data;
     } catch (error) {
       await this.prisma.message.create({
         data: {
@@ -512,16 +383,18 @@ export class ChatService {
         conversationId,
         role: MessageRole.ASSISTANT,
         content: ragResponse.answer || '',
-        context: this.cleanContextForStorage(ragResponse.context) as any,
+        context: this.ragService.cleanContextForStorage(
+          ragResponse.context,
+        ) as any,
       },
     });
 
     // Build and return raw result
     const result = new AskQuestionResultDto();
     result.answer = ragResponse.answer || '';
-    result.citations = this.extractCitationsFromContext(
-      ragResponse.context,
-    ).map((c: any) => this.mapCitation(c));
+    result.citations = this.ragService
+      .extractCitationsFromContext(ragResponse.context)
+      .map((c: any) => this.mapCitation(c));
     result.assistantMessageId = assistantMessage.id;
     result.userMessageId = userMessage.id;
     result.conversationId = conversationId;
@@ -670,17 +543,10 @@ export class ChatService {
       },
     });
 
-    // 4. Call RAG service with multi-query endpoint
-    let ragResponse: any;
+    // 4. Call RAG service with multi-query endpoint via centralized RagService
+    let ragResponse;
     try {
-      const res = await this.http.axiosRef.post(
-        `${this.ragServiceUrl}/query-multi`,
-        {
-          file_ids: fileIds,
-          question,
-        },
-      );
-      ragResponse = res.data;
+      ragResponse = await this.ragService.queryMulti(fileIds, question);
     } catch (error) {
       await this.prisma.message.create({
         data: {
@@ -693,7 +559,9 @@ export class ChatService {
     }
 
     const answerText = ragResponse.answer || '';
-    const rawCitations = this.extractCitationsFromContext(ragResponse.context);
+    const rawCitations = this.ragService.extractCitationsFromContext(
+      ragResponse.context,
+    );
 
     // 5. Create assistant message
     const assistantMessage = await this.prisma.message.create({
@@ -701,7 +569,9 @@ export class ChatService {
         conversationId: actualConversationId,
         role: MessageRole.ASSISTANT,
         content: answerText,
-        context: this.cleanContextForStorage(ragResponse.context) as any,
+        context: this.ragService.cleanContextForStorage(
+          ragResponse.context,
+        ) as any,
       },
     });
 

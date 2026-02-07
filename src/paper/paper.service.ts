@@ -1,22 +1,19 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
+import { RagService } from '../rag';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { PaperItemDto } from './dto/create-paper-response.dto';
 
 @Injectable()
 export class PaperService {
   private readonly logger = new Logger(PaperService.name);
-  private readonly ragUrl: string;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly http: HttpService,
+    private readonly ragService: RagService,
     private readonly s3Service: S3Service,
-  ) {
-    this.ragUrl = process.env.RAG_SERVICE_URL ?? 'http://127.0.0.1:8000';
-  }
+  ) {}
 
   private mapToPaperItem(p: any): PaperItemDto {
     const dto = new PaperItemDto();
@@ -80,37 +77,31 @@ export class PaperService {
         data: { status: 'PROCESSING' },
       });
 
-      // Call RAG service - Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-      const response = await this.http.axiosRef.post(
-        `${this.ragUrl}/ingest-from-url`,
-        {
-          file_url: fileUrl,
-          file_id: ragFileId,
-        },
-      );
+      // Call RAG service via centralized RagService
+      const response = await this.ragService.ingestFromUrl(fileUrl, ragFileId);
 
       // Update paper with metadata from RAG
       // Note: authors comes as array from RAG, serialize to JSON string for storage
-      const authorsJson = Array.isArray(response.data.authors)
-        ? JSON.stringify(response.data.authors)
-        : response.data.authors || null;
+      const authorsJson = Array.isArray(response.authors)
+        ? JSON.stringify(response.authors)
+        : response.authors || null;
 
       await this.prisma.paper.update({
         where: { id: paperId },
         data: {
           status: 'COMPLETED',
-          title: response.data.title,
-          abstract: response.data.abstract,
+          title: response.title,
+          abstract: response.abstract,
           authors: authorsJson,
-          numPages: response.data.num_pages,
-          nodeCount: response.data.node_count,
-          tableCount: response.data.table_count,
-          imageCount: response.data.image_count,
+          numPages: response.num_pages,
+          nodeCount: response.node_count,
+          tableCount: response.table_count,
+          imageCount: response.image_count,
           processedAt: new Date(),
         },
       });
     } catch (error) {
-      console.error('RAG ingestion failed:', error);
+      this.logger.error('RAG ingestion failed:', error);
       await this.prisma.paper.update({
         where: { id: paperId },
         data: {
@@ -213,7 +204,7 @@ export class PaperService {
    */
   private async cleanupRagData(ragFileId: string): Promise<void> {
     try {
-      await this.http.axiosRef.delete(`${this.ragUrl}/cleanup/${ragFileId}`);
+      await this.ragService.cleanup(ragFileId);
       this.logger.log(`RAG cleanup completed for: ${ragFileId}`);
     } catch (error) {
       this.logger.error(`RAG cleanup failed for: ${ragFileId}`, error);
