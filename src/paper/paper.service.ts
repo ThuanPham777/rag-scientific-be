@@ -27,6 +27,8 @@ export class PaperService {
     dto.fileSize = p.fileSize ? Number(p.fileSize) : null;
     dto.title = p.title ?? null;
     dto.abstract = p.abstract ?? null;
+    dto.authors = p.authors ?? null;
+    dto.numPages = p.numPages ?? null;
     dto.status = p.status;
     dto.nodeCount = p.nodeCount ?? null;
     dto.tableCount = p.tableCount ?? null;
@@ -88,12 +90,19 @@ export class PaperService {
       );
 
       // Update paper with metadata from RAG
+      // Note: authors comes as array from RAG, serialize to JSON string for storage
+      const authorsJson = Array.isArray(response.data.authors)
+        ? JSON.stringify(response.data.authors)
+        : response.data.authors || null;
+
       await this.prisma.paper.update({
         where: { id: paperId },
         data: {
           status: 'COMPLETED',
           title: response.data.title,
           abstract: response.data.abstract,
+          authors: authorsJson,
+          numPages: response.data.num_pages,
           nodeCount: response.data.node_count,
           tableCount: response.data.table_count,
           imageCount: response.data.image_count,
