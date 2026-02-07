@@ -198,28 +198,46 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 
 **Mục đích**: Lưu thông tin PDF đã upload và link đến RAG service để thực hiện Q&A.
 
-| Column            | Type          | Constraints          | Mô tả                               |
-| ----------------- | ------------- | -------------------- | ----------------------------------- |
-| `id`              | UUID          | PK, auto             | ID trong hệ thống NestJS            |
-| `user_id`         | UUID          | FK → users, NOT NULL | User sở hữu                         |
-| `folder_id`       | UUID          | FK → folders, NULL   | Thư mục chứa (null = uncategorized) |
-| `file_name`       | VARCHAR(255)  | NOT NULL             | Tên file gốc                        |
-| `file_url`        | VARCHAR(1000) | NOT NULL             | URL trên S3/Cloud storage           |
-| `file_size`       | BIGINT        | NULL                 | Kích thước file (bytes)             |
-| `file_hash`       | VARCHAR(64)   | NULL                 | SHA-256 hash để detect duplicate    |
-| **`rag_file_id`** | VARCHAR(100)  | **UNIQUE, NOT NULL** | **⚠️ CRITICAL: ID trong RAG_BE_02** |
-| `title`           | VARCHAR(500)  | NULL                 | Tiêu đề (từ GROBID)                 |
-| `abstract`        | TEXT          | NULL                 | Tóm tắt (từ GROBID)                 |
-| `authors`         | TEXT          | NULL                 | Tác giả (comma-separated)           |
-| `num_pages`       | INTEGER       | NULL                 | Số trang                            |
-| `status`          | PaperStatus   | DEFAULT 'PENDING'    | Trạng thái xử lý                    |
-| `error_message`   | TEXT          | NULL                 | Chi tiết lỗi nếu FAILED             |
-| `node_count`      | INTEGER       | NULL                 | Số text nodes sau ingest            |
-| `table_count`     | INTEGER       | NULL                 | Số bảng được extract                |
-| `image_count`     | INTEGER       | NULL                 | Số hình được extract                |
-| `processed_at`    | TIMESTAMPTZ   | NULL                 | Thời điểm hoàn thành                |
-| `created_at`      | TIMESTAMPTZ   | DEFAULT NOW          | Ngày upload                         |
-| `updated_at`      | TIMESTAMPTZ   | DEFAULT NOW          | Ngày cập nhật                       |
+| Column            | Type          | Constraints          | Mô tả                                                            |
+| ----------------- | ------------- | -------------------- | ---------------------------------------------------------------- |
+| `id`              | UUID          | PK, auto             | ID trong hệ thống NestJS                                         |
+| `user_id`         | UUID          | FK → users, NOT NULL | User sở hữu                                                      |
+| `folder_id`       | UUID          | FK → folders, NULL   | Thư mục chứa (null = uncategorized)                              |
+| `file_name`       | VARCHAR(255)  | NOT NULL             | Tên file gốc                                                     |
+| `file_url`        | VARCHAR(1000) | NOT NULL             | URL trên S3/Cloud storage                                        |
+| `file_size`       | BIGINT        | NULL                 | Kích thước file (bytes)                                          |
+| `file_hash`       | VARCHAR(64)   | NULL                 | **SHA-256 hash** để detect duplicate (calculated by Frontend)    |
+| **`rag_file_id`** | VARCHAR(100)  | **UNIQUE, NOT NULL** | **⚠️ CRITICAL: ID trong RAG_BE_02**                              |
+| `title`           | VARCHAR(500)  | NULL                 | Tiêu đề (từ GROBID hoặc font-based extraction)                   |
+| `abstract`        | TEXT          | NULL                 | Tóm tắt (từ GROBID)                                              |
+| `authors`         | TEXT          | NULL                 | Tác giả - **JSON array string** (e.g., `["Author1", "Author2"]`) |
+| `num_pages`       | INTEGER       | NULL                 | Tổng số trang PDF (từ PyMuPDF)                                   |
+| `status`          | PaperStatus   | DEFAULT 'PENDING'    | Trạng thái xử lý                                                 |
+| `error_message`   | TEXT          | NULL                 | Chi tiết lỗi nếu FAILED                                          |
+| `node_count`      | INTEGER       | NULL                 | Số text nodes sau ingest                                         |
+| `table_count`     | INTEGER       | NULL                 | Số bảng được extract                                             |
+| `image_count`     | INTEGER       | NULL                 | Số hình được extract                                             |
+| `processed_at`    | TIMESTAMPTZ   | NULL                 | Thời điểm hoàn thành                                             |
+| `created_at`      | TIMESTAMPTZ   | DEFAULT NOW          | Ngày upload                                                      |
+| `updated_at`      | TIMESTAMPTZ   | DEFAULT NOW          | Ngày cập nhật                                                    |
+
+**📌 Metadata Extraction Flow**:
+
+Khi user upload PDF, metadata được extract như sau:
+
+1. **GROBID Service** (nếu available):
+   - `title`: Từ TEI XML header
+   - `authors`: Từ `<author><persName>` elements
+   - `abstract`: Từ `<abstract>` element
+   - `sections`: Full-text semantic sections
+
+2. **Fallback (PyMuPDF)**:
+   - `title`: Extracted từ first page using font-size heuristics (largest font in top 1/3 of page)
+   - `authors`: Empty (không extract được khi không có GROBID)
+   - `abstract`: Text of first page (truncated to 500 chars)
+
+3. **Always (PyMuPDF)**:
+   - `num_pages`: Tổng số trang sử dụng `fitz.open(pdf).page_count`
 
 **⚠️ CRITICAL FIELD: `rag_file_id`**
 
@@ -421,7 +439,111 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-## 🛠️ Migration Commands
+## � Hash Strategy (Dual-Hash Architecture)
+
+Hệ thống sử dụng **hai loại hash khác nhau** cho các mục đích khác nhau:
+
+### 1. Frontend Hash: `papers.file_hash` (SHA-256)
+
+| Attribute      | Value                                                      |
+| -------------- | ---------------------------------------------------------- |
+| **Algorithm**  | SHA-256 (64 hex characters)                                |
+| **Calculated** | Frontend (browser) using Web Crypto API                    |
+| **Stored in**  | `papers.file_hash`                                         |
+| **Purpose**    | **Deduplication** - detect if user uploads same file twice |
+| **Status**     | ⚠️ Stored but deduplication check not yet implemented      |
+
+```typescript
+// Frontend: paper.api.ts
+async function calculateFileHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+```
+
+### 2. RAG Cache Hash: `rag_paper_cache.file_content_hash` (MD5)
+
+| Attribute      | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| **Algorithm**  | MD5 (32 hex characters)                                        |
+| **Calculated** | RAG service (Python) using hashlib                             |
+| **Stored in**  | `rag_paper_cache.file_content_hash`                            |
+| **Purpose**    | **Cache invalidation** - detect if PDF changed, need re-ingest |
+| **Status**     | ✅ Working - used in `needs_rebuild()` function                |
+
+```python
+# RAG: config.py
+def get_file_hash(self) -> str:
+    with open(self.pdf_path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+```
+
+### Why Two Different Hash Algorithms?
+
+| Concern     | Frontend (SHA-256)                        | RAG (MD5)                      |
+| ----------- | ----------------------------------------- | ------------------------------ |
+| Security    | Collision-resistant (important for dedup) | Not security-critical          |
+| Performance | Slower but acceptable in browser          | Fast, suitable for large files |
+| Use case    | User-facing deduplication                 | Internal cache invalidation    |
+
+**Conclusion**: This is intentional design, NOT redundancy. Each hash serves a different purpose.
+
+---
+
+## 🗄️ RAG Service Tables
+
+These tables are **owned and managed by RAG_BE_02** (Python/FastAPI), NOT by the NestJS backend.
+
+### 10. `rag_paper_cache` - RAG Processing Cache
+
+**Mục đích**: Lưu hash của PDF để detect khi file thay đổi và cần re-ingest vector store.
+
+| Column              | Type         | Constraints | Mô tả                             |
+| ------------------- | ------------ | ----------- | --------------------------------- |
+| `rag_paper_id`      | VARCHAR(100) | PK          | Maps to `papers.rag_file_id`      |
+| `file_content_hash` | VARCHAR(64)  | NULL        | MD5 hash của PDF content          |
+| `last_processed_at` | TIMESTAMPTZ  | NULL        | Thời điểm process thành công cuối |
+| `created_at`        | TIMESTAMPTZ  | DEFAULT NOW | Ngày tạo record                   |
+
+**Usage Flow**:
+
+```python
+# When ingesting a PDF:
+1. Calculate current file hash (MD5)
+2. Compare with stored hash in rag_paper_cache
+3. If different → rebuild vector store
+4. Save new hash after successful ingestion
+```
+
+### 11. `paper_content_summaries` - LLM Summary Cache
+
+**Mục đích**: Cache các LLM-generated summaries cho tables và images để tránh gọi API nhiều lần.
+
+| Column          | Type         | Constraints                   | Mô tả                              |
+| --------------- | ------------ | ----------------------------- | ---------------------------------- |
+| `id`            | SERIAL       | PK                            | Auto-increment ID                  |
+| `rag_paper_id`  | VARCHAR(100) | NOT NULL                      | Maps to `papers.rag_file_id`       |
+| `content_type`  | VARCHAR(20)  | NOT NULL, CHECK (table/image) | Loại content: 'table' hoặc 'image' |
+| `content_index` | INTEGER      | NOT NULL                      | Thứ tự trong document (0-indexed)  |
+| `content_hash`  | VARCHAR(64)  | NOT NULL                      | Hash của content để detect changes |
+| `summary_text`  | TEXT         | NOT NULL                      | LLM-generated summary              |
+| `created_at`    | TIMESTAMPTZ  | DEFAULT NOW                   | Ngày generate                      |
+
+**Constraints**:
+
+- `paper_content_summaries_unique`: UNIQUE (`rag_paper_id`, `content_type`, `content_index`)
+
+**Benefits**:
+
+- Tránh gọi LLM lại cho cùng table/image
+- Giảm latency khi re-ingest cùng PDF
+- Tiết kiệm API costs
+
+---
+
+## �🛠️ Migration Commands
 
 ```bash
 # Generate migration from schema changes
@@ -452,12 +574,18 @@ npx prisma migrate status
    - Interval: 2-5 seconds
    - Timeout: 5-10 minutes depending on file size
 
-3. **Context JSONB**:
-   - Store full RAG response for citations UI
-   - Do NOT normalize into separate tables (performance)
-   - Size can be large (~50KB per message)
+3. **Context JSONB Optimization**:
+   - Store RAG response for citations UI
+   - **⚠️ `image_b64` is STRIPPED** before storing to reduce DB size
+   - Images can be re-fetched from RAG if needed
+   - Size reduced from ~500KB to ~50KB per message
 
-4. **Cleanup Jobs (Recommended)**:
+4. **Metadata Extraction**:
+   - `title`, `authors`, `abstract`: Extracted by GROBID or fallback parser
+   - `num_pages`: Always extracted via PyMuPDF
+   - `authors` stored as JSON array string: `["Author 1", "Author 2"]`
+
+5. **Cleanup Jobs (Recommended)**:
    - Expired refresh tokens: Daily
    - Failed papers older than 7 days: Weekly
    - Orphaned files in S3: Monthly

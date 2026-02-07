@@ -23,7 +23,7 @@ import { ApiResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('Upload')
 @Controller('upload')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 export class UploadController {
   constructor(private readonly uploadService: UploadService) {}

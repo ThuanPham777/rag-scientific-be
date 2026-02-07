@@ -5,7 +5,6 @@ import {
   HttpCode,
   HttpStatus,
   Req,
-  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -15,7 +14,7 @@ import {
   ApiBody,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
+import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
@@ -50,17 +49,27 @@ export class AuthController {
   @Post('signup')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'Register a new user',
-    description: 'Create a new user account with email and password',
+    summary: 'Register a new user account',
+    description:
+      'Create a new user account with email and password for local authentication.',
   })
-  @ApiBody({ type: SignupRequestDto })
+  @ApiBody({
+    type: SignupRequestDto,
+    description: 'User registration information',
+  })
   @ApiResponse({
     status: 201,
-    description: 'User successfully registered',
+    description: 'User account successfully created',
     type: SignupResponseDto,
   })
-  @ApiResponse({ status: 409, description: 'Email already in use' })
-  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({
+    status: 409,
+    description: 'Email address is already registered',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid input data (validation errors)',
+  })
   async signUp(@Body() dto: SignupRequestDto): Promise<SignupResponseDto> {
     const data = await this.authService.signUp(dto);
     return SignupResponseDto.fromUser(data, 'User successfully registered');
@@ -69,16 +78,25 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'User login',
-    description: 'Authenticate user with email and password',
+    summary: 'User login with email and password',
+    description:
+      'Authenticate user with local credentials (email and password).',
   })
-  @ApiBody({ type: LoginRequestDto })
+  @ApiBody({
+    type: LoginRequestDto,
+    description: 'User login credentials',
+  })
   @ApiResponse({
     status: 200,
-    description: 'User successfully logged in',
+    description:
+      'User successfully authenticated. Returns user info, access token, and refresh token.',
     type: LoginResponseDto,
   })
-  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({
+    status: 401,
+    description:
+      'Invalid email or password, or account registered with different provider (e.g., Google)',
+  })
   async login(
     @Body() dto: LoginRequestDto,
     @Req() req: Request,
@@ -94,10 +112,14 @@ export class AuthController {
   @Post('google')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Google OAuth login',
-    description: 'Authenticate user with Google ID token',
+    summary: 'Google OAuth login with ID token',
+    description:
+      'Authenticate user using Google ID token from client-side Google Sign-In.',
   })
-  @ApiBody({ type: GoogleAuthDto })
+  @ApiBody({
+    type: GoogleAuthDto,
+    description: 'Google ID token from client-side authentication',
+  })
   @ApiResponse({
     status: 200,
     description: 'Google login successful',
@@ -119,11 +141,14 @@ export class AuthController {
   @Post('google/code')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Google OAuth login with Authorization Code',
+    summary: 'Google OAuth login with Authorization Code (Recommended)',
     description:
-      'Authenticate user with Google Authorization Code flow (more secure)',
+      'Authenticate user using Google Authorization Code flow - more secure than ID token flow.',
   })
-  @ApiBody({ type: GoogleCodeAuthDto })
+  @ApiBody({
+    type: GoogleCodeAuthDto,
+    description: 'Google authorization code and related parameters',
+  })
   @ApiResponse({
     status: 200,
     description: 'Google login successful',
@@ -146,9 +171,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Refresh access token',
-    description: 'Get new access token using refresh token',
+    description: 'Obtain a new access token using a valid refresh token.',
   })
-  @ApiBody({ type: RefreshTokenDto })
+  @ApiBody({
+    type: RefreshTokenDto,
+    description: 'Current valid refresh token',
+  })
   @ApiResponse({
     status: 200,
     description: 'Tokens refreshed successfully',
@@ -170,10 +198,14 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Logout',
-    description: 'Revoke the refresh token',
+    summary: 'Logout from current device',
+    description:
+      'Logout user by revoking the refresh token for the current session.',
   })
-  @ApiBody({ type: LogoutDto })
+  @ApiBody({
+    type: LogoutDto,
+    description: 'Refresh token to revoke',
+  })
   @ApiResponse({
     status: 200,
     description: 'Logged out successfully',
@@ -190,7 +222,7 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Logout from all devices',
-    description: 'Revoke all refresh tokens for the user',
+    description: 'Logout user from all devices by revoking ALL refresh tokens.',
   })
   @ApiResponse({
     status: 200,

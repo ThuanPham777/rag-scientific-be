@@ -1,7 +1,7 @@
 // src/guest/guest.service.ts
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { S3Service } from '../upload/s3.service';
+import { RagService } from '../rag';
 import {
   GuestUploadResultDto,
   GuestAskQuestionDto,
@@ -10,43 +10,9 @@ import {
   GuestExplainRegionDto,
 } from './dto/guest.dto';
 
-interface RagContextItem {
-  source_id: string;
-  text: string;
-  type?: string;
-  page?: number;
-  metadata?: {
-    section_title?: string;
-    page_label?: number;
-    page_start?: number;
-    page_end?: number;
-    modality?: string;
-    bbox?: any;
-    layout_width?: number;
-    layout_height?: number;
-    [key: string]: any;
-  };
-  image_b64?: string;
-  table_html?: string;
-}
-
-interface RagContext {
-  texts?: RagContextItem[];
-  tables?: RagContextItem[];
-  images?: RagContextItem[];
-  citations?: any[];
-  model_name?: string;
-  token_count?: number;
-}
-
-interface RagQueryResponse {
-  answer: string;
-  context?: RagContext;
-}
-
 @Injectable()
 export class GuestService {
-  private readonly ragServiceUrl: string;
+  private readonly logger = new Logger(GuestService.name);
   // In-memory store for ingest status (in production, use Redis)
   private readonly ingestStatus: Map<
     string,
@@ -54,11 +20,9 @@ export class GuestService {
   > = new Map();
 
   constructor(
-    private readonly http: HttpService,
+    private readonly ragService: RagService,
     private readonly s3Service: S3Service,
-  ) {
-    this.ragServiceUrl = process.env.RAG_SERVICE_URL || 'http://127.0.0.1:8000';
-  }
+  ) {}
 
   /**
    * Upload PDF for guest user - uploads to S3 and starts ingest in background
@@ -106,21 +70,18 @@ export class GuestService {
   }
 
   /**
-   * Ingest file in background
+   * Ingest file in background via centralized RagService
    */
   private async ingestInBackground(
     ragFileId: string,
     fileUrl: string,
   ): Promise<void> {
     try {
-      await this.http.axiosRef.post(`${this.ragServiceUrl}/ingest-from-url`, {
-        file_url: fileUrl,
-        file_id: ragFileId,
-      });
+      await this.ragService.ingestFromUrl(fileUrl, ragFileId);
       this.ingestStatus.set(ragFileId, 'COMPLETED');
-      console.log(`✅ Ingest completed for ${ragFileId}`);
+      this.logger.log(`✅ Ingest completed for ${ragFileId}`);
     } catch (error) {
-      console.error(`❌ Ingest failed for ${ragFileId}:`, error);
+      this.logger.error(`❌ Ingest failed for ${ragFileId}:`, error);
       this.ingestStatus.set(ragFileId, 'FAILED');
     }
   }
@@ -154,26 +115,21 @@ export class GuestService {
       );
     }
 
-    // Call RAG service
-    let ragResponse: RagQueryResponse;
+    // Call RAG service via centralized RagService
+    let ragResponse;
     try {
-      const res = await this.http.axiosRef.post<RagQueryResponse>(
-        `${this.ragServiceUrl}/query`,
-        {
-          file_id: ragFileId,
-          question,
-        },
-      );
-      ragResponse = res.data;
+      ragResponse = await this.ragService.query(ragFileId, question);
     } catch (error) {
-      console.error('RAG query failed for guest:', error);
+      this.logger.error('RAG query failed for guest:', error);
       throw new BadRequestException(
         'Failed to process your question. Please try again.',
       );
     }
 
     const answerText = ragResponse.answer || '';
-    const rawCitations = this.extractCitationsFromContext(ragResponse.context);
+    const rawCitations = this.ragService.extractCitationsFromContext(
+      ragResponse.context,
+    );
 
     const result = new GuestAskQuestionResultDto();
     result.answer = answerText;
@@ -210,32 +166,24 @@ export class GuestService {
       question ||
       'Please explain what is shown in this selected region of the document.';
 
-    // Strip data URL prefix if present (RAG API expects raw base64)
-    let rawBase64 = imageBase64;
-    if (imageBase64.includes(',')) {
-      rawBase64 = imageBase64.split(',')[1];
-    }
-
-    // Call RAG service with image
-    let ragResponse: RagQueryResponse;
+    // Call RAG service with image via centralized RagService
+    let ragResponse;
     try {
-      const res = await this.http.axiosRef.post<RagQueryResponse>(
-        `${this.ragServiceUrl}/explain-region`,
-        {
-          file_id: ragFileId,
-          question: prompt,
-          image_b64: rawBase64,
-          page_number: pageNumber,
-        },
+      ragResponse = await this.ragService.explainRegion(
+        ragFileId,
+        prompt,
+        imageBase64,
+        pageNumber,
       );
-      ragResponse = res.data;
     } catch (error) {
-      console.error('RAG explain region failed for guest:', error);
+      this.logger.error('RAG explain region failed for guest:', error);
       throw new BadRequestException('Failed to explain the selected region.');
     }
 
     const answerText = ragResponse.answer || '';
-    const rawCitations = this.extractCitationsFromContext(ragResponse.context);
+    const rawCitations = this.ragService.extractCitationsFromContext(
+      ragResponse.context,
+    );
 
     const result = new GuestAskQuestionResultDto();
     result.answer = answerText;
@@ -244,44 +192,6 @@ export class GuestService {
     result.tokenCount = ragResponse.context?.token_count || 0;
 
     return result;
-  }
-
-  /**
-   * Extract citations from RAG context
-   */
-  private extractCitationsFromContext(context?: RagContext): any[] {
-    if (!context) return [];
-
-    if (context.citations && Array.isArray(context.citations)) {
-      return context.citations;
-    }
-
-    const citations: any[] = [];
-
-    if (context.texts && Array.isArray(context.texts)) {
-      citations.push(...context.texts.map((t) => ({ ...t, modality: 'text' })));
-    }
-
-    if (context.tables && Array.isArray(context.tables)) {
-      citations.push(
-        ...context.tables.map((t) => ({ ...t, modality: 'table' })),
-      );
-    }
-
-    if (context.images && Array.isArray(context.images)) {
-      citations.push(
-        ...context.images.map((img) => ({
-          source_id: img.source_id,
-          text: img.text,
-          type: img.type,
-          page: img.page,
-          metadata: img.metadata,
-          modality: 'image',
-        })),
-      );
-    }
-
-    return citations;
   }
 
   /**

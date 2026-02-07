@@ -31,15 +31,32 @@ import {
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
 
-@ApiTags('Chat')
-@ApiBearerAuth()
+@ApiTags('chat')
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Post('ask')
-  @ApiOperation({ summary: 'Ask a question about the paper (RAG Q&A)' })
+  @ApiOperation({
+    summary: 'Ask a question about a paper',
+    description: `Ask a question about a specific paper using RAG (Retrieval-Augmented Generation).
+
+**How it works:**
+1. Finds relevant content from the paper using vector search
+2. Uses AI to generate contextual answers based on the content
+3. Returns answer with precise citations and page references
+
+**Features:**
+- Supports text, image, and table content analysis
+- Maintains conversation context within the same conversation
+- Provides citation metadata (page numbers, bounding boxes, etc.)
+
+**Requirements:**
+- Paper must be fully processed (status: COMPLETED)
+- Valid conversation ID for the paper`,
+  })
   @ApiOkResponse({ type: AskQuestionResponseDto })
   async ask(
     @CurrentUser() user: any,
@@ -53,7 +70,24 @@ export class ChatController {
   }
 
   @Post('ask-multi')
-  @ApiOperation({ summary: 'Ask a question across multiple papers' })
+  @ApiOperation({
+    summary: 'Ask a question across multiple papers',
+    description: `Analyze and compare multiple papers simultaneously with a single question.
+
+**Multi-Paper Analysis:**
+- Searches across all specified papers
+- Compares information between different sources
+- Identifies contradictions or consensus
+- Provides citations from multiple papers
+
+**Use Cases:**
+- Literature reviews
+- Comparative analysis
+- Finding consensus across research
+- Identifying research gaps
+
+**Returns:** Comprehensive answer with sources from each paper`,
+  })
   @ApiOkResponse({ type: AskMultiPaperResponseDto })
   async askMultiPaper(
     @CurrentUser() user: any,
@@ -67,7 +101,22 @@ export class ChatController {
   }
 
   @Get('messages/:conversationId')
-  @ApiOperation({ summary: 'Get message history for a conversation' })
+  @ApiOperation({
+    summary: 'Get conversation message history',
+    description: `Retrieve the complete message history for a conversation.
+
+**Message Types:**
+- **USER**: Questions asked by the user
+- **ASSISTANT**: AI-generated responses with citations
+
+**Included Data:**
+- All messages in chronological order
+- Citation information with page references
+- Token usage statistics
+- Model information used for responses
+
+**Usage:** Display chat history in the frontend interface`,
+  })
   @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
   @ApiOkResponse({ type: GetMessagesResponseDto })
   async getMessages(

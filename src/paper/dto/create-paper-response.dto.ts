@@ -62,6 +62,20 @@ export class PaperItemDto {
   })
   abstract?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Danh sách tác giả - extracted bởi GROBID. Stored as JSON array string.',
+    example: '["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"]',
+  })
+  authors?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tổng số trang của PDF',
+    example: 15,
+    minimum: 1,
+  })
+  numPages?: number;
+
   @ApiProperty({
     description: `Trạng thái xử lý paper trong RAG pipeline:
 - **PENDING**: Vừa upload, chờ ingest

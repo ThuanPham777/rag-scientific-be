@@ -95,7 +95,6 @@ export class FolderService {
    */
   async create(userId: string, dto: CreateFolderDto): Promise<FolderItemDto> {
     // Check for duplicate name
-    console.log('userId', userId, 'dto.name', dto.name);
     const existing = await this.prisma.folder.findUnique({
       where: {
         userId_name: {

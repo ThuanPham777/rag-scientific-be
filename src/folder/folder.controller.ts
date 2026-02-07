@@ -35,7 +35,7 @@ import {
 } from '../common/dto/api-response.dto';
 
 @ApiTags('folders')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('folders')
 export class FolderController {
