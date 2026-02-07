@@ -40,12 +40,13 @@ export class AuthService {
   }
 
   private issueAccessToken(payload: Record<string, any>) {
-    const accessTtl = this.config.get<string>('JWT_ACCESS_EXPIRES') ?? '15m';
+    const accessTtl = this.config.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m';
     return this.jwt.sign(payload, { expiresIn: accessTtl });
   }
 
   private issueRefreshToken(payload: Record<string, any>) {
-    const refreshTtl = this.config.get<string>('JWT_REFRESH_EXPIRES') ?? '7d';
+    const refreshTtl =
+      this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
     return this.jwt.sign(payload, { expiresIn: refreshTtl });
   }
 
@@ -53,14 +54,49 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private getRefreshTokenExpiry(): Date {
-    const days = parseInt(
-      this.config.get<string>('JWT_REFRESH_DAYS') ?? '7',
-      10,
-    );
-    return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  /**
+   * Parse JWT expiry time string (e.g., "7d", "24h") and convert to Date
+   * This ensures consistency between JWT expiry and database expiry
+   */
+  private parseExpiryToDate(expiryString: string): Date {
+    const now = Date.now();
+    const match = expiryString.match(/^(\d+)([smhd])$/);
+
+    if (!match) {
+      // Fallback to 7 days if parsing fails
+      return new Date(now + 7 * 24 * 60 * 60 * 1000);
+    }
+
+    const [, amount, unit] = match;
+    const num = parseInt(amount, 10);
+
+    switch (unit) {
+      case 's':
+        return new Date(now + num * 1000);
+      case 'm':
+        return new Date(now + num * 60 * 1000);
+      case 'h':
+        return new Date(now + num * 60 * 60 * 1000);
+      case 'd':
+        return new Date(now + num * 24 * 60 * 60 * 1000);
+      default:
+        return new Date(now + 7 * 24 * 60 * 60 * 1000);
+    }
   }
 
+  private getRefreshTokenExpiry(): Date {
+    const refreshTtl =
+      this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    return this.parseExpiryToDate(refreshTtl);
+  }
+
+  /**
+   * Build access and refresh tokens for a user
+   * @param user User information
+   * @param deviceInfo Optional device information from User-Agent header
+   * @param ipAddress Optional IP address
+   * @returns Object containing accessToken and refreshToken
+   */
   private async buildTokens(
     user: { id: string; email: string; provider: string },
     deviceInfo?: string,
@@ -71,17 +107,18 @@ export class AuthService {
       email: user.email,
       provider: user.provider,
     };
+
     const accessToken = this.issueAccessToken(payload);
     const refreshToken = this.issueRefreshToken(payload);
 
-    // Store hashed refresh token in DB
+    // Store hashed refresh token in DB with consistent expiry
     const hashedToken = this.hashToken(refreshToken);
     await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
         token: hashedToken,
-        deviceInfo,
-        ipAddress,
+        deviceInfo: deviceInfo || 'unknown',
+        ipAddress: ipAddress || 'unknown',
         expiresAt: this.getRefreshTokenExpiry(),
       },
     });
@@ -163,34 +200,33 @@ export class AuthService {
     };
   }
 
-  // ========================
-  // GOOGLE OAUTH
-  // ========================
   /**
-   * Authenticate user with Google ID token
-   * @returns Raw login result with user and tokens
+   * Common logic for processing Google user after token verification
+   * @param googlePayload The verified Google token payload
+   * @param deviceInfo Optional device information
+   * @param ipAddress Optional IP address
+   * @returns LoginResultDto with user and tokens
    */
-  async googleAuth(
-    dto: GoogleAuthDto,
+  private async processGoogleUser(
+    googlePayload: {
+      sub?: string;
+      email?: string;
+      name?: string;
+      picture?: string;
+      [key: string]: any;
+    },
     deviceInfo?: string,
     ipAddress?: string,
   ): Promise<LoginResultDto> {
-    if (!this.googleClient) {
-      throw new BadRequestException('Google OAuth is not configured');
+    const { sub: googleId, email, name, picture } = googlePayload;
+
+    // Validate required fields
+    if (!googleId) {
+      throw new UnauthorizedException('Invalid Google token: missing user ID');
     }
-
-    // Verify the Google ID token
-    const ticket = await this.googleClient.verifyIdToken({
-      idToken: dto.idToken,
-      audience: this.config.get<string>('GOOGLE_CLIENT_ID'),
-    });
-
-    const payload = ticket.getPayload();
-    if (!payload || !payload.email) {
-      throw new UnauthorizedException('Invalid Google token');
+    if (!email) {
+      throw new UnauthorizedException('Invalid Google token: missing email');
     }
-
-    const { sub: googleId, email, name, picture } = payload;
 
     // Check if user exists with this Google account
     let user = await this.usersService.findByProviderId('GOOGLE', googleId);
@@ -200,7 +236,7 @@ export class AuthService {
       const existingUser = await this.usersService.findByEmail(email);
       if (existingUser && existingUser.provider === 'LOCAL') {
         throw new BadRequestException(
-          'Email already registered. Please login with password.',
+          'Email already registered with password. Please login with your password.',
         );
       }
 
@@ -209,7 +245,7 @@ export class AuthService {
         email,
         provider: 'GOOGLE',
         providerId: googleId,
-        displayName: name,
+        displayName: name || email.split('@')[0], // Fallback to email prefix if no name
         avatarUrl: picture,
       });
     }
@@ -230,6 +266,49 @@ export class AuthService {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
     };
+  }
+
+  // ========================
+  // GOOGLE OAUTH
+  // ========================
+  /**
+   * Authenticate user with Google ID token
+   * @returns Raw login result with user and tokens
+   */
+  async googleAuth(
+    dto: GoogleAuthDto,
+    deviceInfo?: string,
+    ipAddress?: string,
+  ): Promise<LoginResultDto> {
+    if (!this.googleClient) {
+      throw new BadRequestException('Google OAuth is not configured');
+    }
+
+    try {
+      // Verify the Google ID token
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: this.config.get<string>('GOOGLE_CLIENT_ID'),
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        throw new UnauthorizedException('Invalid Google token');
+      }
+
+      return await this.processGoogleUser(payload, deviceInfo, ipAddress);
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+      console.error('Google OAuth ID token error:', error);
+      throw new UnauthorizedException(
+        'Failed to authenticate with Google. Please try again.',
+      );
+    }
   }
 
   // ========================
@@ -280,47 +359,7 @@ export class AuthService {
         throw new UnauthorizedException('Invalid Google token payload');
       }
 
-      const { sub: googleId, email, name, picture } = payload;
-
-      // Check if user exists with this Google account
-      let user = await this.usersService.findByProviderId('GOOGLE', googleId);
-
-      if (!user) {
-        // Check if email already used by LOCAL account
-        const existingUser = await this.usersService.findByEmail(email);
-        if (existingUser && existingUser.provider === 'LOCAL') {
-          throw new BadRequestException(
-            'Email already registered with password. Please login with your password.',
-          );
-        }
-
-        // Create new Google user
-        user = await this.usersService.createOAuthUser({
-          email,
-          provider: 'GOOGLE',
-          providerId: googleId,
-          displayName: name,
-          avatarUrl: picture,
-        });
-      }
-
-      // Update last login
-      await this.usersService.updateLastLogin(user.id);
-
-      // Issue our own JWT tokens
-      const tokens = await this.buildTokens(user, deviceInfo, ipAddress);
-
-      return {
-        user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          avatarUrl: user.avatarUrl,
-          provider: user.provider,
-        },
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-      };
+      return await this.processGoogleUser(payload, deviceInfo, ipAddress);
     } catch (error) {
       if (
         error instanceof BadRequestException ||
@@ -328,7 +367,7 @@ export class AuthService {
       ) {
         throw error;
       }
-      console.error('Google OAuth error:', error);
+      console.error('Google OAuth authorization code error:', error);
       throw new UnauthorizedException(
         'Failed to authenticate with Google. Please try again.',
       );

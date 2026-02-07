@@ -30,7 +30,7 @@ import { ApiResponseDto } from '../common/dto/api-response.dto';
  * Create and list operations are handled by HighlightController (nested routes)
  */
 @ApiTags('comments')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('comments')
 export class CommentController {

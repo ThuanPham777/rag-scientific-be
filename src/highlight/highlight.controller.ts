@@ -37,7 +37,7 @@ import { ListCommentsResponseDto, CommentResponseDto } from './dto/comment.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('highlights')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class HighlightController {

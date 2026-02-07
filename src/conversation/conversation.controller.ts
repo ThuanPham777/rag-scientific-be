@@ -30,7 +30,7 @@ import {
 } from '../common/dto/api-response.dto';
 
 @ApiTags('Conversations')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationController {

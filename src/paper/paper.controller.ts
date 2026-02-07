@@ -29,7 +29,7 @@ import {
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
 
-@ApiTags('Papers')
+@ApiTags('papers')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('papers')
@@ -37,7 +37,24 @@ export class PaperController {
   constructor(private readonly paperService: PaperService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new paper after uploading PDF' })
+  @ApiOperation({
+    summary: 'Register uploaded PDF for AI analysis',
+    description: `Register a PDF file that was previously uploaded to create a new paper entry.
+
+**Processing Pipeline:**
+1. Creates database entry with PENDING status
+2. Triggers RAG ingestion in background
+3. Extracts text, images, and tables
+4. Builds vector embeddings for search
+5. Updates status to COMPLETED when ready
+
+**File Requirements:**
+- PDF must be already uploaded via /upload endpoint
+- Maximum 50MB file size
+- Scientific papers work best
+
+**Processing Time:** Usually 30 seconds to 5 minutes depending on paper length`,
+  })
   @ApiOkResponse({ type: CreatePaperResponseDto })
   async create(
     @CurrentUser() user: CurrentUserPayload,
@@ -51,7 +68,24 @@ export class PaperController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all papers for the user' })
+  @ApiOperation({
+    summary: 'List all user papers',
+    description: `Get all papers belonging to the authenticated user.
+
+**Returned Information:**
+- Basic paper metadata (title, authors, abstract)
+- Processing status (PENDING, PROCESSING, COMPLETED, FAILED)
+- File information (size, upload date)
+- Statistics (page count, node count, etc.)
+
+**Sorting:** Papers are returned by creation date (newest first)
+
+**Status Meanings:**
+- **PENDING**: Queued for processing
+- **PROCESSING**: Currently being analyzed by RAG
+- **COMPLETED**: Ready for Q&A and analysis
+- **FAILED**: Processing encountered an error`,
+  })
   @ApiOkResponse({ type: ListPapersResponseDto })
   async list(
     @CurrentUser() user: CurrentUserPayload,
@@ -64,7 +98,22 @@ export class PaperController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get paper details by ID' })
+  @ApiOperation({
+    summary: 'Get detailed paper information',
+    description: `Retrieve complete details for a specific paper.
+
+**Includes:**
+- Full metadata (title, authors, abstract, page count)
+- Processing status and timestamps
+- File information and storage details
+- RAG processing statistics
+
+**ID Parameter:** Can be either:
+- Database paper ID (UUID)
+- RAG file ID (for internal references)
+
+**Use Case:** Display paper details in frontend before starting conversations`,
+  })
   @ApiParam({ name: 'id', description: 'Paper ID or RAG file_id' })
   @ApiOkResponse({ type: GetPaperResponseDto })
   async get(
@@ -76,7 +125,25 @@ export class PaperController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a paper' })
+  @ApiOperation({
+    summary: 'Delete paper and all associated data',
+    description: `Permanently delete a paper and all related data.
+
+**What gets deleted:**
+- Database record (paper, conversations, messages)
+- PDF file from cloud storage
+- Vector embeddings from RAG system
+- All associated chat history
+
+**⚠️ Warning:** This action is irreversible!
+
+**Cascading Deletions:**
+- All conversations for this paper
+- All messages in those conversations
+- All highlights and comments
+
+**Background Processing:** File deletion happens asynchronously`,
+  })
   @ApiParam({ name: 'id', description: 'Paper ID' })
   @ApiOkResponse({ type: DeletePaperResponseDto })
   async delete(
