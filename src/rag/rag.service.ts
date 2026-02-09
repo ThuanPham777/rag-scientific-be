@@ -7,6 +7,10 @@ import {
   RagOrphanedGuestFile,
   RagContext,
   RagContextItem,
+  RagBrainstormResponse,
+  RagFollowUpResponse,
+  RagRelatedPapersResponse,
+  RagSummarizeResponse,
 } from './dto';
 
 /**
@@ -171,6 +175,112 @@ export class RagService {
     );
 
     return response.data.files || [];
+  }
+
+  // ============================================================
+  // Brainstorm, Related Papers, Summarize
+  // ============================================================
+
+  /**
+   * Generate brainstorm questions for a paper
+   * @param fileId - RAG file ID of the paper
+   * @param textInput - Optional user text hint for question generation
+   * @returns Brainstorm response with list of questions
+   */
+  async brainstormQuestions(
+    fileId: string,
+    textInput?: string,
+  ): Promise<RagBrainstormResponse> {
+    this.logger.debug(
+      `Brainstorming questions for file: ${fileId}, textInput: ${textInput?.substring(0, 50)}`,
+    );
+
+    const response = await this.http.axiosRef.post<RagBrainstormResponse>(
+      `${this.ragUrl}/brainstorm-questions`,
+      {
+        file_id: fileId,
+        text_input: textInput || null,
+      },
+    );
+
+    return response.data;
+  }
+
+  /**
+   * Generate follow-up questions based on an assistant answer.
+   * Re-uses the /brainstorm-questions endpoint with the assistant
+   * message content as `text_input` so the LLM can generate
+   * contextual follow-ups.
+   *
+   * @param fileId - RAG file ID of the paper
+   * @param messageContent - The assistant answer to derive follow-ups from
+   * @returns Follow-up response with list of questions
+   */
+  async generateFollowUpQuestions(
+    fileId: string,
+    messageContent: string,
+  ): Promise<RagFollowUpResponse> {
+    this.logger.debug(
+      `Generating follow-up questions for file: ${fileId}, answer length: ${messageContent.length}`,
+    );
+
+    // Re-use the brainstorm-questions endpoint; the Python service
+    // already supports text_input which steers the LLM.
+    const response = await this.http.axiosRef.post<RagFollowUpResponse>(
+      `${this.ragUrl}/brainstorm-questions`,
+      {
+        file_id: fileId,
+        text_input: messageContent,
+      },
+    );
+
+    return response.data;
+  }
+
+  /**
+   * Get related papers from arXiv for a paper
+   * @param fileId - RAG file ID of the paper
+   * @param topK - Number of top related papers to return
+   * @param maxResults - Max arXiv search results before re-ranking
+   * @returns Related papers response
+   */
+  async getRelatedPapers(
+    fileId: string,
+    topK: number = 5,
+    maxResults: number = 30,
+  ): Promise<RagRelatedPapersResponse> {
+    this.logger.debug(
+      `Getting related papers for file: ${fileId}, topK: ${topK}`,
+    );
+
+    const response = await this.http.axiosRef.post<RagRelatedPapersResponse>(
+      `${this.ragUrl}/related-papers`,
+      {
+        file_id: fileId,
+        top_k: topK,
+        max_results: maxResults,
+      },
+    );
+
+    return response.data;
+  }
+
+  /**
+   * Generate a comprehensive summary for a paper
+   * @param fileId - RAG file ID of the paper
+   * @returns Summary response with generated summary text
+   */
+  async summarizePaper(fileId: string): Promise<RagSummarizeResponse> {
+    this.logger.debug(`Summarizing paper: ${fileId}`);
+
+    const response = await this.http.axiosRef.post<RagSummarizeResponse>(
+      `${this.ragUrl}/summarize-paper`,
+      {
+        file_id: fileId,
+      },
+    );
+
+    return response.data;
   }
 
   // ============================================================

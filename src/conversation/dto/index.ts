@@ -9,3 +9,9 @@ export * from './create-conversation-response.dto';
 export * from './list-conversations-response.dto';
 export * from './get-conversation-response.dto';
 export * from './delete-conversation-response.dto';
+
+// Suggested Questions
+export * from './suggested-questions.dto';
+
+// Follow-Up Questions
+export * from './follow-up-questions.dto';

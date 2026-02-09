@@ -182,6 +182,7 @@ model Paper {
   title           String?     @db.VarChar(500)
   abstract        String?     @db.Text
   authors         String?     @db.Text  // JSON array string
+  summary         String?     @db.Text  // LLM-generated paper summary
   numPages        Int?        @map("num_pages")
 
   // === Processing Status ===
@@ -203,7 +204,6 @@ model Paper {
   folder             Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
   conversations      Conversation[]
   conversationPapers ConversationPaper[]
-  suggestedQuestions SuggestedQuestion[]
   relatedPapers      RelatedPaper[]
   highlights         Highlight[]
 
@@ -247,6 +247,7 @@ model Conversation {
   paper              Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages           Message[]
   conversationPapers ConversationPaper[]
+  suggestedQuestions SuggestedQuestion[]
 
   @@index([userId])
   @@index([paperId])
@@ -298,7 +299,7 @@ model Message {
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation    Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([createdAt])
@@ -309,20 +310,19 @@ model Message {
 // SECTION 6: SUGGESTED QUESTIONS
 // ============================================================================
 
-/// Cached suggested questions for a paper
+/// Cached suggested questions for a conversation
 model SuggestedQuestion {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  paperId       String   @map("paper_id") @db.Uuid
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId   String       @map("conversation_id") @db.Uuid
 
-  question      String   @db.Text
-  orderIndex    Int      @map("order_index")
+  question         String       @db.Text
 
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
-  paper         Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([paperId])
+  @@index([conversationId])
   @@map("suggested_questions")
 }
 
