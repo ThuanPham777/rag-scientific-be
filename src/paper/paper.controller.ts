@@ -33,8 +33,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/jwt.strategy';
 import {
   ApiResponseDto,
+  CursorPaginationDto,
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
+import { ListPaperRequestsDto } from './dto/list-papers-request.dto';
 
 @ApiTags('papers')
 @ApiBearerAuth('JWT-auth')
@@ -96,10 +98,19 @@ export class PaperController {
   @ApiOkResponse({ type: ListPapersResponseDto })
   async list(
     @CurrentUser() user: CurrentUserPayload,
+    @Query() listPaperRequestsDto: ListPaperRequestsDto,
   ): Promise<ListPapersResponseDto> {
-    const data = await this.paperService.listMyPapers(user.id);
+    const { limit = 20, cursor } = listPaperRequestsDto;
+    const data = await this.paperService.listMyPapers(user.id, limit, cursor);
+
+    const pagination = new CursorPaginationDto(
+      data.items,
+      limit,
+      data.nextCursor,
+    );
+
     return ApiResponseDto.success(
-      data,
+      pagination,
       'List of papers',
     ) as ListPapersResponseDto;
   }

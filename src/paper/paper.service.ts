@@ -119,13 +119,35 @@ export class PaperService {
    * List all papers for a user
    * @returns Raw array of papers
    */
-  async listMyPapers(userId: string): Promise<PaperItemDto[]> {
+  async listMyPapers(
+    userId: string,
+    limit: number = 20,
+    cursor?: string,
+  ): Promise<{
+    items: PaperItemDto[];
+    nextCursor?: string;
+  }> {
     const papers = await this.prisma.paper.findMany({
       where: { userId },
+      take: limit + 1, // lấy dư 1 record
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
       orderBy: { createdAt: 'desc' },
     });
 
-    return papers.map((p) => this.mapToPaperItem(p));
+    let nextCursor: string | undefined;
+
+    if (papers.length > limit) {
+      papers.pop(); // remove extra record used for hasMore check
+      nextCursor = papers[papers.length - 1]?.id; // cursor = last item of current page
+    }
+
+    const items = papers.map((p) => this.mapToPaperItem(p));
+
+    return {
+      items,
+      nextCursor,
+    };
   }
 
   /**

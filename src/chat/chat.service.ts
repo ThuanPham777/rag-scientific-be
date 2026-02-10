@@ -172,11 +172,12 @@ export class ChatService {
   async getMessageHistory(
     userId: string,
     conversationId: string,
-  ): Promise<MessageItemDto[]> {
+    cursor?: string,
+    limit: number = 20,
+  ) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
       include: {
-        // Include conversationPapers for multi-paper citation mapping
         conversationPapers: {
           include: {
             paper: {
@@ -198,28 +199,13 @@ export class ChatService {
       );
     }
 
-    // Build ragFileId -> paperId mapping for multi-paper citations
-    const ragFileIdToPaperId = new Map<string, string>();
-    const paperInfoMap = new Map<
-      string,
-      { fileName: string; fileUrl: string | null }
-    >();
-
-    if (conversation.conversationPapers?.length > 0) {
-      for (const cp of conversation.conversationPapers) {
-        if (cp.paper.ragFileId) {
-          ragFileIdToPaperId.set(cp.paper.ragFileId, cp.paper.id);
-          paperInfoMap.set(cp.paper.id, {
-            fileName: cp.paper.fileName,
-            fileUrl: cp.paper.fileUrl,
-          });
-        }
-      }
-    }
-
+    // 🔥 Prisma cursor pagination
     const messages = await this.prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: 'asc' },
+      take: limit + 1,
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         role: true,
@@ -227,13 +213,36 @@ export class ChatService {
         imageUrl: true,
         modelName: true,
         tokenCount: true,
-        context: true, // Include context to get citations
+        context: true,
         createdAt: true,
       },
     });
 
-    // Map messages and extract citations from context for assistant messages
-    return messages.map((msg) => {
+    let nextCursor: string | undefined;
+
+    if (messages.length > limit) {
+      messages.pop(); // remove extra record used for hasMore check
+      nextCursor = messages[messages.length - 1]?.id; // cursor = last item of current page
+    }
+
+    // Build citation mapping
+    const ragFileIdToPaperId = new Map<string, string>();
+    const paperInfoMap = new Map<
+      string,
+      { fileName: string; fileUrl: string | null }
+    >();
+
+    for (const cp of conversation.conversationPapers ?? []) {
+      if (cp.paper.ragFileId) {
+        ragFileIdToPaperId.set(cp.paper.ragFileId, cp.paper.id);
+        paperInfoMap.set(cp.paper.id, {
+          fileName: cp.paper.fileName,
+          fileUrl: cp.paper.fileUrl,
+        });
+      }
+    }
+
+    const mappedMessages: MessageItemDto[] = messages.map((msg) => {
       const base: MessageItemDto = {
         id: msg.id,
         role: msg.role,
@@ -244,15 +253,14 @@ export class ChatService {
         createdAt: msg.createdAt,
       };
 
-      // Extract citations from context for assistant messages
       if (msg.role === 'ASSISTANT' && msg.context) {
         const context = msg.context as any;
         const rawCitations =
           this.ragService.extractCitationsFromContext(context);
-        // Pass the mapping for multi-paper citations
+
         base.citations = rawCitations.map((c: any) => {
           const citation = this.mapCitation(c, ragFileIdToPaperId);
-          // Enrich with paper info
+
           if (
             citation.sourcePaperId &&
             paperInfoMap.has(citation.sourcePaperId)
@@ -261,12 +269,18 @@ export class ChatService {
             citation.sourcePaperTitle = paperInfo.fileName;
             citation.sourceFileUrl = paperInfo.fileUrl;
           }
+
           return citation;
         });
       }
 
       return base;
     });
+
+    return {
+      items: mappedMessages,
+      nextCursor,
+    };
   }
 
   /**
