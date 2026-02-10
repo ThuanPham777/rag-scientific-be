@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
-import { RagService } from '../rag';
+import { RagService } from '../rag/index';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { PaperItemDto } from './dto/create-paper-response.dto';
 import { RelatedPapersResultDto } from './dto/related-papers.dto';

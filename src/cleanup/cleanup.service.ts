@@ -3,7 +3,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
-import { RagService } from '../rag';
+import { RagService } from '../rag/index';
 
 /**
  * Cleanup Service - Handles periodic cleanup tasks

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
-import { RagService, RagContext, RagContextItem } from '../rag';
+import { RagService } from '../rag/index';
 import { AskQuestionRequestDto } from './dto/ask-question-request.dto';
 import {
   AskQuestionResultDto,
@@ -15,11 +15,10 @@ import {
 } from './dto/ask-question-response.dto';
 import {
   AskMultiPaperResultDto,
-  MultiPaperSourceDto,
   ConversationPaperDto,
 } from './dto/ask-multi-paper-request.dto';
 import { MessageItemDto } from './dto/get-messages-response.dto';
-import { MessageRole, ConversationType } from '@prisma/client';
+import { MessageRole, ConversationType } from '../../generated/prisma/client';
 
 @Injectable()
 export class ChatService {

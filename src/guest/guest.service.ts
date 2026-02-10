@@ -1,7 +1,7 @@
 // src/guest/guest.service.ts
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { S3Service } from '../upload/s3.service';
-import { RagService } from '../rag';
+import { RagService } from '../rag/index';
 import {
   GuestUploadResultDto,
   GuestAskQuestionDto,

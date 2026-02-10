@@ -20,7 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FolderService } from './folder.service';
-import { CreateFolderDto, UpdateFolderDto, MovePaperDto } from './dto';
+import { CreateFolderDto, UpdateFolderDto, MovePaperDto } from './dto/index';
 import {
   ListFoldersResponseDto,
   GetFolderResponseDto,

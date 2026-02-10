@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { HighlightColor } from '@prisma/client';
+import { HighlightColor } from '../../../generated/prisma/client';
 
 /**
  * Selection rectangle DTO
