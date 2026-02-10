@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -28,8 +29,10 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ExplainRegionRequestDto } from './dto/explain-region-request.dto';
 import {
   ApiResponseDto,
+  CursorPaginationDto,
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
+import { GetMessagesRquestDto } from './dto/get-messages-request.dto';
 
 @ApiTags('chat')
 @ApiBearerAuth('JWT-auth')
@@ -41,21 +44,8 @@ export class ChatController {
   @Post('ask')
   @ApiOperation({
     summary: 'Ask a question about a paper',
-    description: `Ask a question about a specific paper using RAG (Retrieval-Augmented Generation).
-
-**How it works:**
-1. Finds relevant content from the paper using vector search
-2. Uses AI to generate contextual answers based on the content
-3. Returns answer with precise citations and page references
-
-**Features:**
-- Supports text, image, and table content analysis
-- Maintains conversation context within the same conversation
-- Provides citation metadata (page numbers, bounding boxes, etc.)
-
-**Requirements:**
-- Paper must be fully processed (status: COMPLETED)
-- Valid conversation ID for the paper`,
+    description:
+      'Ask a question about a specific paper using RAG (Retrieval-Augmented Generation).',
   })
   @ApiOkResponse({ type: AskQuestionResponseDto })
   async ask(
@@ -72,21 +62,8 @@ export class ChatController {
   @Post('ask-multi')
   @ApiOperation({
     summary: 'Ask a question across multiple papers',
-    description: `Analyze and compare multiple papers simultaneously with a single question.
-
-**Multi-Paper Analysis:**
-- Searches across all specified papers
-- Compares information between different sources
-- Identifies contradictions or consensus
-- Provides citations from multiple papers
-
-**Use Cases:**
-- Literature reviews
-- Comparative analysis
-- Finding consensus across research
-- Identifying research gaps
-
-**Returns:** Comprehensive answer with sources from each paper`,
+    description:
+      'Analyze and compare multiple papers simultaneously with a single question.',
   })
   @ApiOkResponse({ type: AskMultiPaperResponseDto })
   async askMultiPaper(
@@ -103,32 +80,32 @@ export class ChatController {
   @Get('messages/:conversationId')
   @ApiOperation({
     summary: 'Get conversation message history',
-    description: `Retrieve the complete message history for a conversation.
-
-**Message Types:**
-- **USER**: Questions asked by the user
-- **ASSISTANT**: AI-generated responses with citations
-
-**Included Data:**
-- All messages in chronological order
-- Citation information with page references
-- Token usage statistics
-- Model information used for responses
-
-**Usage:** Display chat history in the frontend interface`,
+    description: 'Retrieve the complete message history for a conversation.',
   })
   @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
   @ApiOkResponse({ type: GetMessagesResponseDto })
   async getMessages(
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
+    @Query() query: GetMessagesRquestDto,
   ): Promise<GetMessagesResponseDto> {
-    const data = await this.chatService.getMessageHistory(
+    const { limit = 20, cursor } = query;
+
+    const result = await this.chatService.getMessageHistory(
       user.id,
       conversationId,
+      cursor,
+      limit,
     );
+
+    const pagination = new CursorPaginationDto(
+      result.items,
+      limit,
+      result.nextCursor,
+    );
+
     return ApiResponseDto.success(
-      data,
+      pagination,
       'Messages retrieved',
     ) as GetMessagesResponseDto;
   }

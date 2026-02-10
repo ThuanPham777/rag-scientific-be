@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -13,6 +14,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,12 +24,19 @@ import { CreatePaperResponseDto } from './dto/create-paper-response.dto';
 import { ListPapersResponseDto } from './dto/list-papers-response.dto';
 import { GetPaperResponseDto } from './dto/get-paper-response.dto';
 import { DeletePaperResponseDto } from './dto/delete-paper-response.dto';
+import { PaperSummaryResponseDto } from './dto/paper-summary.dto';
+import {
+  GetRelatedPapersRequestDto,
+  RelatedPapersResponseDto,
+} from './dto/related-papers.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/jwt.strategy';
 import {
   ApiResponseDto,
+  CursorPaginationDto,
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
+import { ListPaperRequestsDto } from './dto/list-papers-request.dto';
 
 @ApiTags('papers')
 @ApiBearerAuth('JWT-auth')
@@ -89,10 +98,19 @@ export class PaperController {
   @ApiOkResponse({ type: ListPapersResponseDto })
   async list(
     @CurrentUser() user: CurrentUserPayload,
+    @Query() listPaperRequestsDto: ListPaperRequestsDto,
   ): Promise<ListPapersResponseDto> {
-    const data = await this.paperService.listMyPapers(user.id);
+    const { limit = 20, cursor } = listPaperRequestsDto;
+    const data = await this.paperService.listMyPapers(user.id, limit, cursor);
+
+    const pagination = new CursorPaginationDto(
+      data.items,
+      limit,
+      data.nextCursor,
+    );
+
     return ApiResponseDto.success(
-      data,
+      pagination,
       'List of papers',
     ) as ListPapersResponseDto;
   }
@@ -154,5 +172,52 @@ export class PaperController {
     return EmptyResponseDto.success(
       'Paper deleted successfully',
     ) as DeletePaperResponseDto;
+  }
+
+  // ============================================================
+  // Summary, Related Papers, Brainstorm Questions
+  // ============================================================
+
+  @Post(':id/summary')
+  @ApiOperation({
+    summary: 'Generate or get paper summary',
+    description: 'Generate a comprehensive LLM-powered summary of the paper.',
+  })
+  @ApiParam({ name: 'id', description: 'Paper ID' })
+  @ApiOkResponse({ type: PaperSummaryResponseDto })
+  async getSummary(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<PaperSummaryResponseDto> {
+    const data = await this.paperService.getSummary(user.id, id);
+    return ApiResponseDto.success(
+      data,
+      'Paper summary generated',
+    ) as PaperSummaryResponseDto;
+  }
+
+  @Post(':id/related-papers')
+  @ApiOperation({
+    summary: 'Get related papers from arXiv',
+    description:
+      'Find related research papers on arXiv using LLM-powered search and re-ranking.',
+  })
+  @ApiParam({ name: 'id', description: 'Paper ID' })
+  @ApiOkResponse({ type: RelatedPapersResponseDto })
+  async getRelatedPapers(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: GetRelatedPapersRequestDto,
+  ): Promise<RelatedPapersResponseDto> {
+    const data = await this.paperService.getRelatedPapers(
+      user.id,
+      id,
+      dto.topK ?? 5,
+      dto.maxResults ?? 30,
+    );
+    return ApiResponseDto.success(
+      data,
+      'Related papers retrieved',
+    ) as RelatedPapersResponseDto;
   }
 }

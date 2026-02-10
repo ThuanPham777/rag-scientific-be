@@ -63,6 +63,12 @@ export class PaperItemDto {
   abstract?: string;
 
   @ApiPropertyOptional({
+    description: 'LLM-generated comprehensive summary of the paper',
+    example: '## Overview\nThis paper presents a novel approach...',
+  })
+  summary?: string;
+
+  @ApiPropertyOptional({
     description:
       'Danh sách tác giả - extracted bởi GROBID. Stored as JSON array string.',
     example: '["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"]',

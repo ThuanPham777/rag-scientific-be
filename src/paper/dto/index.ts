@@ -9,3 +9,8 @@ export * from './create-paper-response.dto';
 export * from './get-paper-response.dto';
 export * from './list-papers-response.dto';
 export * from './delete-paper-response.dto';
+
+// Feature DTOs
+export * from './paper-summary.dto';
+export * from './related-papers.dto';
+export * from './brainstorm-questions.dto';

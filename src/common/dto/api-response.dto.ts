@@ -2,6 +2,8 @@
 // Unified API response wrapper for all endpoints
 
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsOptional, Min } from 'class-validator';
 
 /**
  * Standard API response wrapper
@@ -66,33 +68,82 @@ export class EmptyResponseDto {
   }
 }
 
-/**
- * Pagination metadata
- */
-export class PaginationMeta {
-  @ApiProperty({ description: 'Current page number', example: 1 })
-  page: number;
-
-  @ApiProperty({ description: 'Items per page', example: 20 })
+/* Cursor pagination */
+export class CursorPaginationMeta {
+  @ApiProperty({ description: 'Items per request', example: 20 })
   limit: number;
 
-  @ApiProperty({ description: 'Total number of items', example: 100 })
-  total: number;
+  @ApiProperty({
+    description: 'Cursor for next request',
+    example: 'ckv123abc',
+    nullable: true,
+  })
+  nextCursor?: string;
 
-  @ApiProperty({ description: 'Total number of pages', example: 5 })
-  totalPages: number;
+  @ApiProperty({
+    description: 'Cursor for previous request',
+    example: 'ckv122xyz',
+    nullable: true,
+  })
+  prevCursor?: string;
 
   @ApiProperty({ description: 'Has next page', example: true })
   hasNext: boolean;
 
   @ApiProperty({ description: 'Has previous page', example: false })
   hasPrev: boolean;
+
+  @ApiProperty({ description: 'Number of returned items', example: 20 })
+  count: number;
+}
+
+export class CursorPaginationDto<T = any> {
+  @ApiProperty({ isArray: true })
+  items: T[];
+
+  @ApiProperty({ type: CursorPaginationMeta })
+  pagination: CursorPaginationMeta;
+
+  constructor(
+    items: T[],
+    limit: number,
+    nextCursor?: string,
+    prevCursor?: string,
+  ) {
+    this.items = items;
+    this.pagination = {
+      limit,
+      nextCursor,
+      prevCursor,
+      hasNext: !!nextCursor,
+      hasPrev: !!prevCursor,
+      count: items.length,
+    };
+  }
 }
 
 /**
- * Paginated response wrapper
+ * ================================
+ * Cursor Pagination Request
+ * ================================
  */
-export class PaginatedResponseDto<T> extends ApiResponseDto<T[]> {
-  @ApiProperty({ type: PaginationMeta })
-  pagination: PaginationMeta;
+
+export class CursorPaginationReqDto {
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    description: 'Cursor ID',
+  })
+  @IsOptional()
+  cursor?: string;
+
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    default: 20,
+  })
+  @Type(() => Number)
+  @Min(1)
+  @IsOptional()
+  limit?: number;
 }

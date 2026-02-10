@@ -1,7 +1,7 @@
 // src/chat/dto/get-messages-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ApiResponseDto } from '../../common/dto/api-response.dto';
 import { ChatCitationDto } from './ask-question-response.dto';
+import { ApiResponseDto, CursorPaginationDto } from 'src/common/dto';
 
 /**
  * Message item in conversation history
@@ -51,10 +51,9 @@ export class MessageItemDto {
   citations?: ChatCitationDto[];
 }
 
-/**
- * Get messages response DTO
- */
-export class GetMessagesResponseDto extends ApiResponseDto<MessageItemDto[]> {
-  @ApiProperty({ type: [MessageItemDto] })
-  declare data: MessageItemDto[];
+export class GetMessagesResponseDto extends ApiResponseDto<
+  CursorPaginationDto<MessageItemDto>
+> {
+  @ApiProperty({ type: CursorPaginationDto })
+  declare data: CursorPaginationDto<MessageItemDto>;
 }

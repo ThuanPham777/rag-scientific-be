@@ -91,4 +91,60 @@ export class UsersService {
       data,
     });
   }
+
+  /**
+   * Store hashed password reset token and expiry
+   */
+  async setPasswordResetToken(
+    userId: string,
+    hashedToken: string,
+    expiresAt: Date,
+  ) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordResetToken: hashedToken,
+        passwordResetExpiresAt: expiresAt,
+      },
+    });
+  }
+
+  /**
+   * Find user by hashed reset token that hasn't expired
+   */
+  async findByResetToken(hashedToken: string) {
+    return this.prisma.user.findFirst({
+      where: {
+        passwordResetToken: hashedToken,
+        passwordResetExpiresAt: { gt: new Date() },
+      },
+    });
+  }
+
+  /**
+   * Update user password and clear reset token
+   */
+  async updatePassword(userId: string, passwordHash: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+      },
+    });
+  }
+
+  /**
+   * Clear password reset token (invalidate)
+   */
+  async clearPasswordResetToken(userId: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+      },
+    });
+  }
 }

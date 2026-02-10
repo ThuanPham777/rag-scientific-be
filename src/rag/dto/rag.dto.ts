@@ -116,3 +116,99 @@ export interface RagOrphanedGuestFile {
 export interface RagOrphanedGuestsResponse {
   files: RagOrphanedGuestFile[];
 }
+
+// ============================================================
+// Brainstorm Questions
+// ============================================================
+
+/**
+ * Brainstorm Request - for /brainstorm-questions endpoint
+ */
+export interface RagBrainstormRequest {
+  file_id: string;
+  text_input?: string;
+}
+
+/**
+ * Brainstorm Response - from /brainstorm-questions endpoint
+ */
+export interface RagBrainstormResponse {
+  questions: string[];
+}
+
+// ============================================================
+// Related Papers
+// ============================================================
+
+/**
+ * Related Papers Request - for /related-papers endpoint
+ */
+export interface RagRelatedPapersRequest {
+  file_id: string;
+  top_k?: number;
+  max_results?: number;
+}
+
+/**
+ * A single related paper from arXiv
+ */
+export interface RagRelatedPaperItem {
+  arxiv_id: string;
+  title: string;
+  abstract: string;
+  authors: string[];
+  categories: string[];
+  url: string;
+  score: number;
+  reason: string;
+}
+
+/**
+ * Related Papers Response - from /related-papers endpoint
+ */
+export interface RagRelatedPapersResponse {
+  file_id: string;
+  base_title?: string;
+  base_abstract?: string;
+  results: RagRelatedPaperItem[];
+}
+
+// ============================================================
+// Follow-Up Questions (per message)
+// ============================================================
+
+/**
+ * Follow-Up Request - for /brainstorm-questions endpoint (reused)
+ * We send the latest assistant answer as text_input so the RAG
+ * generates follow-ups that are contextually relevant.
+ */
+export interface RagFollowUpRequest {
+  file_id: string;
+  text_input: string;
+}
+
+/**
+ * Follow-Up Response - reuses same shape as brainstorm
+ */
+export interface RagFollowUpResponse {
+  questions: string[];
+}
+
+// ============================================================
+// Summarize Paper
+// ============================================================
+
+/**
+ * Summarize Request - for /summarize-paper endpoint
+ */
+export interface RagSummarizeRequest {
+  file_id: string;
+}
+
+/**
+ * Summarize Response - from /summarize-paper endpoint
+ */
+export interface RagSummarizeResponse {
+  file_id: string;
+  summary: string;
+}
