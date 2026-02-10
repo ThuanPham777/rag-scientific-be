@@ -1,10 +1,7 @@
 // src/highlight/dto/highlight-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { HighlightColor } from '@prisma/client';
-import {
-  ApiResponseDto,
-  EmptyResponseDto,
-} from '../../common/dto/api-response.dto';
+import { HighlightColor } from '../../../generated/prisma/client';
+import { ApiResponseDto } from '../../common/dto/api-response.dto';
 import { SelectionRectDto } from './create-highlight.dto';
 import { CommentItemDto } from './comment.dto';
 

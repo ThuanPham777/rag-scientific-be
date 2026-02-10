@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
-import { CreateFolderDto, UpdateFolderDto, MovePaperDto } from './dto';
+import { CreateFolderDto, UpdateFolderDto, MovePaperDto } from './dto/index';
 import {
   FolderItemDto,
   FolderWithPapersDto,

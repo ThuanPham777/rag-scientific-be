@@ -5,11 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RagService } from '../rag';
-import { ConversationType } from '@prisma/client';
+import { RagService } from '../rag/index';
+import { ConversationType } from '../../generated/prisma/client';
 import { CreateConversationRequestDto } from './dto/create-conversation-request.dto';
 import { ConversationItemDto } from './dto/create-conversation-response.dto';
-import { SuggestedQuestionsResultDto, FollowUpQuestionsResultDto } from './dto';
+import { SuggestedQuestionsResultDto, FollowUpQuestionsResultDto } from './dto/index';
 
 /**
  * Conversation with extra fields for list response

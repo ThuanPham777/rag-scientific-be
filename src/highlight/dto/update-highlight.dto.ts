@@ -1,7 +1,7 @@
 // src/highlight/dto/update-highlight.dto.ts
 import { IsOptional, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { HighlightColor } from '@prisma/client';
+import { HighlightColor } from '../../../generated/prisma/client';
 
 /**
  * Update highlight request DTO
