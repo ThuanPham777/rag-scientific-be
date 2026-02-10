@@ -26,7 +26,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { LogoutDto } from './dto/logout.dto';
+import { LogoutRequestDto } from './dto/logout-request.dto';
+import { ForgotPasswordRequestDto } from './dto/forgot-password-request.dto';
+import { ForgotPasswordResponseDto } from './dto/forgot-password-response.dto';
+import { ResetPasswordRequestDto } from './dto/reset-password-request.dto';
+import { ResetPasswordResponseDto } from './dto/reset-password-response.dto';
 import { EmptyResponseDto } from '../common/dto/api-response.dto';
 
 @ApiTags('auth')
@@ -203,7 +207,7 @@ export class AuthController {
       'Logout user by revoking the refresh token for the current session.',
   })
   @ApiBody({
-    type: LogoutDto,
+    type: LogoutRequestDto,
     description: 'Refresh token to revoke',
   })
   @ApiResponse({
@@ -211,7 +215,7 @@ export class AuthController {
     description: 'Logged out successfully',
     type: LogoutResponseDto,
   })
-  async logout(@Body() dto: LogoutDto): Promise<LogoutResponseDto> {
+  async logout(@Body() dto: LogoutRequestDto): Promise<LogoutResponseDto> {
     await this.authService.logout(dto.refreshToken);
     return EmptyResponseDto.success('Logged out successfully');
   }
@@ -232,5 +236,64 @@ export class AuthController {
   async logoutAll(@CurrentUser() user: any): Promise<LogoutResponseDto> {
     await this.authService.logoutAll(user.sub);
     return EmptyResponseDto.success('Logged out from all devices');
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request password reset email',
+    description:
+      'Send a password reset email to the specified email address. Always returns success to prevent email enumeration.',
+  })
+  @ApiBody({
+    type: ForgotPasswordRequestDto,
+    description: 'Email address to send reset link to',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'If the email exists, a reset link has been sent. Always returns 200.',
+    type: ForgotPasswordResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid email format',
+  })
+  async forgotPassword(
+    @Body() dto: ForgotPasswordRequestDto,
+  ): Promise<ForgotPasswordResponseDto> {
+    await this.authService.forgotPassword(dto);
+    return EmptyResponseDto.success(
+      'If an account with that email exists, a password reset link has been sent.',
+    );
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset password with token',
+    description:
+      'Reset user password using a valid reset token received via email.',
+  })
+  @ApiBody({
+    type: ResetPasswordRequestDto,
+    description: 'Reset token and new password',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password has been reset successfully',
+    type: ResetPasswordResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired reset token',
+  })
+  async resetPassword(
+    @Body() dto: ResetPasswordRequestDto,
+  ): Promise<ResetPasswordResponseDto> {
+    await this.authService.resetPassword(dto);
+    return EmptyResponseDto.success(
+      'Password has been reset successfully. Please log in with your new password.',
+    );
   }
 }

@@ -2,24 +2,29 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { SignupRequestDto } from './dto/signup-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
-import { LoginResultDto, UserDto } from './dto/login-response.dto';
-import { SignupUserDto } from './dto/signup-response.dto';
+import { LoginResultDto } from './dto/login-response.dto';
+import { SignupUserResultDto } from './dto/signup-response.dto';
 import { OAuth2Client } from 'google-auth-library';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ForgotPasswordRequestDto } from './dto/forgot-password-request.dto';
+import { ResetPasswordRequestDto } from './dto/reset-password-request.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client;
 
   constructor(
@@ -27,6 +32,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly emailService: EmailService,
   ) {
     const googleClientId = this.config.get<string>('GOOGLE_CLIENT_ID');
     const googleClientSecret = this.config.get<string>('GOOGLE_CLIENT_SECRET');
@@ -133,7 +139,7 @@ export class AuthService {
    * Register a new user
    * @returns Raw user data
    */
-  async signUp(dto: SignupRequestDto): Promise<SignupUserDto> {
+  async signUp(dto: SignupRequestDto): Promise<SignupUserResultDto> {
     const hash = await bcrypt.hash(dto.password, 10);
     const user = await this.usersService.createLocalUser({
       email: dto.email,
@@ -462,5 +468,93 @@ export class AuthService {
       where: { userId },
       data: { isRevoked: true },
     });
+  }
+
+  // ========================
+  // FORGOT PASSWORD
+  // ========================
+  /**
+   * Generate reset token and send password reset email
+   * Always returns success to prevent email enumeration attacks
+   */
+  async forgotPassword(dto: ForgotPasswordRequestDto): Promise<void> {
+    const user = await this.usersService.findByEmail(dto.email);
+
+    // Silently return if user not found or is OAuth user (prevent enumeration)
+    if (!user || user.provider !== 'LOCAL') {
+      this.logger.log(
+        `Forgot password requested for non-existent or OAuth email: ${dto.email}`,
+      );
+      return;
+    }
+
+    // Generate secure random token
+    const rawToken = randomBytes(32).toString('hex');
+    const hashedToken = this.hashToken(rawToken);
+
+    // Token expires in 1 hour
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    // Store hashed token in DB
+    await this.usersService.setPasswordResetToken(
+      user.id,
+      hashedToken,
+      expiresAt,
+    );
+
+    // Build reset URL
+    const frontendUrl =
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
+    const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
+
+    // Send email (don't throw if email fails - log and return)
+    try {
+      const result = await this.emailService.sendPasswordResetEmail(
+        user.email,
+        resetUrl,
+        user.displayName ?? undefined,
+      );
+
+      if (!result.success) {
+        this.logger.error(
+          `Failed to send reset email to ${user.email}: ${result.error}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Failed to send reset email to ${user.email}:`, error);
+    }
+  }
+
+  // ========================
+  // RESET PASSWORD
+  // ========================
+  /**
+   * Validate reset token and update password
+   */
+  async resetPassword(dto: ResetPasswordRequestDto): Promise<void> {
+    const hashedToken = this.hashToken(dto.token);
+
+    // Find user by valid (non-expired) reset token
+    const user = await this.usersService.findByResetToken(hashedToken);
+
+    if (!user) {
+      throw new BadRequestException(
+        'Invalid or expired reset token. Please request a new password reset.',
+      );
+    }
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+
+    // Update password and clear reset token (single-use)
+    await this.usersService.updatePassword(user.id, passwordHash);
+
+    // Also revoke all existing refresh tokens for security
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id },
+      data: { isRevoked: true },
+    });
+
+    this.logger.log(`Password reset successful for user: ${user.id}`);
   }
 }

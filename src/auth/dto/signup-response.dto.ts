@@ -5,7 +5,7 @@ import { ApiResponseDto } from '../../common/dto/api-response.dto';
 /**
  * User data returned in signup response
  */
-export class SignupUserDto {
+export class SignupUserResultDto {
   @ApiProperty({ description: 'User ID', example: 'uuid-here' })
   id: string;
 
@@ -23,20 +23,20 @@ export class SignupUserDto {
   provider: string;
 }
 
-// Alias for backward compatibility
-export { SignupUserDto as SignupUserResponseDto };
-
 /**
  * Signup response DTO (for Swagger documentation)
  */
-export class SignupResponseDto extends ApiResponseDto<SignupUserDto> {
-  @ApiProperty({ type: SignupUserDto })
-  declare data: SignupUserDto;
+export class SignupResponseDto extends ApiResponseDto<SignupUserResultDto> {
+  @ApiProperty({ type: SignupUserResultDto })
+  declare data: SignupUserResultDto;
 
   /**
    * Create signup response from raw user data
    */
-  static fromUser(user: SignupUserDto, message: string): SignupResponseDto {
+  static fromUser(
+    user: SignupUserResultDto,
+    message: string,
+  ): SignupResponseDto {
     const response = new SignupResponseDto();
     response.success = true;
     response.message = message;
