@@ -59,26 +59,6 @@ export class MultiPaperSourceDto {
 }
 
 /**
- * Paper in conversation for multi-paper chat
- */
-export class ConversationPaperDto {
-  @ApiProperty({ description: 'Paper ID', example: 'uuid-here' })
-  paperId: string;
-
-  @ApiProperty({ description: 'Order index in conversation', example: 0 })
-  orderIndex: number;
-
-  @ApiProperty({ description: 'File name', example: 'paper.pdf' })
-  fileName: string;
-
-  @ApiPropertyOptional({
-    description: 'File URL',
-    example: 'https://s3.example.com/paper.pdf',
-  })
-  fileUrl?: string | null;
-}
-
-/**
  * Result DTO for multi-paper chat
  */
 export class AskMultiPaperResultDto {
@@ -96,12 +76,6 @@ export class AskMultiPaperResultDto {
 
   @ApiProperty({ type: [MultiPaperSourceDto], description: 'Source papers' })
   sources: MultiPaperSourceDto[];
-
-  @ApiProperty({
-    type: [ConversationPaperDto],
-    description: 'Papers in conversation',
-  })
-  conversationPapers: ConversationPaperDto[];
 
   @ApiPropertyOptional({
     description: 'Assistant message ID',

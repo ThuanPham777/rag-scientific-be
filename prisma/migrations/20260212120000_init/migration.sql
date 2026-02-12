@@ -1,6 +1,6 @@
 -- ============================================================================
 -- RAG SCIENTIFIC - CONSOLIDATED INITIAL MIGRATION
--- Generated: 2026-02-10
+-- Generated: 2026-02-12
 --
 -- This creates the complete database schema from scratch.
 -- Database: PostgreSQL
@@ -130,13 +130,14 @@ CREATE INDEX "papers_status_idx" ON "papers"("status");
 
 -- ============================================================================
 -- TABLE: conversations
+-- paper_id is NULLABLE — NULL for MULTI_PAPER conversations
 -- ============================================================================
 
 CREATE TABLE "conversations"
 (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" UUID NOT NULL,
-    "paper_id" UUID NOT NULL,
+    "paper_id" UUID,
     "title" VARCHAR(300),
     "type" "ConversationType" NOT NULL DEFAULT 'SINGLE_PAPER',
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -149,25 +150,6 @@ CREATE INDEX "conversations_user_id_idx" ON "conversations"("user_id");
 CREATE INDEX "conversations_paper_id_idx" ON "conversations"("paper_id");
 CREATE INDEX "conversations_created_at_idx" ON "conversations"("created_at");
 CREATE INDEX "conversations_type_idx" ON "conversations"("type");
-
--- ============================================================================
--- TABLE: conversation_papers
--- ============================================================================
-
-CREATE TABLE "conversation_papers"
-(
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "conversation_id" UUID NOT NULL,
-    "paper_id" UUID NOT NULL,
-    "order_index" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "conversation_papers_pkey" PRIMARY KEY ("id")
-);
-
-CREATE UNIQUE INDEX "conversation_papers_conversation_id_paper_id_key" ON "conversation_papers"("conversation_id", "paper_id");
-CREATE INDEX "conversation_papers_conversation_id_idx" ON "conversation_papers"("conversation_id");
-CREATE INDEX "conversation_papers_paper_id_idx" ON "conversation_papers"("paper_id");
 
 -- ============================================================================
 -- TABLE: messages
@@ -286,90 +268,78 @@ CREATE TABLE "related_papers"
 
     -- refresh_tokens → users
     ALTER TABLE "refresh_tokens"
-    ADD CONSTRAINT "refresh_tokens_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "refresh_tokens_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- folders → users
     ALTER TABLE "folders"
-    ADD CONSTRAINT "folders_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "folders_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- papers → users
     ALTER TABLE "papers"
-    ADD CONSTRAINT "papers_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "papers_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- papers → folders
     ALTER TABLE "papers"
-    ADD CONSTRAINT "papers_folder_id_fkey"
-    FOREIGN KEY ("folder_id") REFERENCES "folders"("id")
-    ON DELETE SET NULL ON UPDATE CASCADE;
+ADD CONSTRAINT "papers_folder_id_fkey"
+FOREIGN KEY ("folder_id") REFERENCES "folders"("id")
+ON DELETE SET NULL ON UPDATE CASCADE;
 
     -- conversations → users
     ALTER TABLE "conversations"
-    ADD CONSTRAINT "conversations_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "conversations_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
-    -- conversations → papers
+    -- conversations → papers (nullable for MULTI_PAPER)
     ALTER TABLE "conversations"
-    ADD CONSTRAINT "conversations_paper_id_fkey"
-    FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
-
-    -- conversation_papers → conversations
-    ALTER TABLE "conversation_papers"
-    ADD CONSTRAINT "conversation_papers_conversation_id_fkey"
-    FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
-
-    -- conversation_papers → papers
-    ALTER TABLE "conversation_papers"
-    ADD CONSTRAINT "conversation_papers_paper_id_fkey"
-    FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "conversations_paper_id_fkey"
+FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- messages → conversations
     ALTER TABLE "messages"
-    ADD CONSTRAINT "messages_conversation_id_fkey"
-    FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "messages_conversation_id_fkey"
+FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- suggested_questions → conversations
     ALTER TABLE "suggested_questions"
-    ADD CONSTRAINT "suggested_questions_conversation_id_fkey"
-    FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "suggested_questions_conversation_id_fkey"
+FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- related_papers → papers
     ALTER TABLE "related_papers"
-    ADD CONSTRAINT "related_papers_paper_id_fkey"
-    FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "related_papers_paper_id_fkey"
+FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- highlights → papers
     ALTER TABLE "highlights"
-    ADD CONSTRAINT "highlights_paper_id_fkey"
-    FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "highlights_paper_id_fkey"
+FOREIGN KEY ("paper_id") REFERENCES "papers"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- highlights → users
     ALTER TABLE "highlights"
-    ADD CONSTRAINT "highlights_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "highlights_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- highlight_comments → highlights
     ALTER TABLE "highlight_comments"
-    ADD CONSTRAINT "highlight_comments_highlight_id_fkey"
-    FOREIGN KEY ("highlight_id") REFERENCES "highlights"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "highlight_comments_highlight_id_fkey"
+FOREIGN KEY ("highlight_id") REFERENCES "highlights"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;
 
     -- highlight_comments → users
     ALTER TABLE "highlight_comments"
-    ADD CONSTRAINT "highlight_comments_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "users"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ADD CONSTRAINT "highlight_comments_user_id_fkey"
+FOREIGN KEY ("user_id") REFERENCES "users"("id")
+ON DELETE CASCADE ON UPDATE CASCADE;

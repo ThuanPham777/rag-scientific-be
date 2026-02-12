@@ -9,7 +9,10 @@ import { RagService } from '../rag/index';
 import { ConversationType } from '../../generated/prisma/client';
 import { CreateConversationRequestDto } from './dto/create-conversation-request.dto';
 import { ConversationItemDto } from './dto/create-conversation-response.dto';
-import { SuggestedQuestionsResultDto, FollowUpQuestionsResultDto } from './dto/index';
+import {
+  SuggestedQuestionsResultDto,
+  FollowUpQuestionsResultDto,
+} from './dto/index';
 
 /**
  * Conversation with extra fields for list response
@@ -177,21 +180,6 @@ export class ConversationService {
             fileName: true,
           },
         },
-        // Include all papers for multi-paper conversations
-        conversationPapers: {
-          include: {
-            paper: {
-              select: {
-                id: true,
-                ragFileId: true,
-                title: true,
-                fileUrl: true,
-                fileName: true,
-              },
-            },
-          },
-          orderBy: { orderIndex: 'asc' },
-        },
       },
     });
 
@@ -199,36 +187,26 @@ export class ConversationService {
       throw new NotFoundException('Conversation not found');
     }
 
-    // Build papers array for multi-paper conversations
-    const papers =
-      conv.conversationPapers?.length > 0
-        ? conv.conversationPapers.map((cp) => ({
-            id: cp.paper.id,
-            ragFileId: cp.paper.ragFileId,
-            title: cp.paper.title,
-            fileName: cp.paper.fileName,
-            fileUrl: cp.paper.fileUrl,
-            orderIndex: cp.orderIndex,
-          }))
-        : conv.paper
-          ? [
-              {
-                id: conv.paper.id,
-                ragFileId: conv.paper.ragFileId,
-                title: conv.paper.title,
-                fileName: conv.paper.fileName,
-                fileUrl: conv.paper.fileUrl,
-                orderIndex: 0,
-              },
-            ]
-          : [];
+    // For single-paper, use the paper relation
+    // For multi-paper, paper info is derived from assistant message citations
+    const papers = conv.paper
+      ? [
+          {
+            id: conv.paper.id,
+            ragFileId: conv.paper.ragFileId,
+            title: conv.paper.title,
+            fileName: conv.paper.fileName,
+            fileUrl: conv.paper.fileUrl,
+            orderIndex: 0,
+          },
+        ]
+      : [];
 
     return {
       ...this.mapToItem(conv),
       ragFileId: conv.paper?.ragFileId,
       paperTitle: conv.paper?.title,
       paperUrl: conv.paper?.fileUrl,
-      // Include papers array for multi-paper support
       papers,
       messages: conv.messages.map((m) => ({
         id: m.id,

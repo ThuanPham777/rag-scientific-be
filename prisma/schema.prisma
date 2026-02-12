@@ -209,7 +209,6 @@ model Paper {
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder             Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
   conversations      Conversation[]
-  conversationPapers ConversationPaper[]
   relatedPapers      RelatedPaper[]
   highlights         Highlight[]
 
@@ -240,7 +239,7 @@ enum ConversationType {
 model Conversation {
   id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId        String           @map("user_id") @db.Uuid
-  paperId       String           @map("paper_id") @db.Uuid
+  paperId       String?          @map("paper_id") @db.Uuid
 
   title         String?          @db.VarChar(300)
   type          ConversationType @default(SINGLE_PAPER)
@@ -250,9 +249,8 @@ model Conversation {
 
   // Relations
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  paper              Paper               @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  paper              Paper?              @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages           Message[]
-  conversationPapers ConversationPaper[]
   suggestedQuestions SuggestedQuestion[]
 
   @@index([userId])
@@ -260,25 +258,6 @@ model Conversation {
   @@index([createdAt])
   @@index([type])
   @@map("conversations")
-}
-
-/// ConversationPaper - Join table for multi-paper conversations
-model ConversationPaper {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  conversationId  String   @map("conversation_id") @db.Uuid
-  paperId         String   @map("paper_id") @db.Uuid
-  orderIndex      Int      @default(0) @map("order_index")
-
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  paper           Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
-
-  @@unique([conversationId, paperId])
-  @@index([conversationId])
-  @@index([paperId])
-  @@map("conversation_papers")
 }
 
 enum MessageRole {

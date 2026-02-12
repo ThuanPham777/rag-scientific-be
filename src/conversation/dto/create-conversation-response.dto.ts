@@ -16,12 +16,12 @@ export class ConversationItemDto {
   })
   id: string;
 
-  @ApiProperty({
-    description: 'Paper ID chính của conversation này',
+  @ApiPropertyOptional({
+    description: 'Paper ID chính của conversation này (null cho multi-paper)',
     example: 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
     format: 'uuid',
   })
-  paperId: string;
+  paperId?: string;
 
   @ApiProperty({
     description: 'ID của user sở hữu conversation',
