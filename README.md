@@ -6,11 +6,10 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)
 ![Prisma](https://img.shields.io/badge/Prisma-6.x-2D3748.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**NestJS Backend API for RAG Scientific - AI-Powered Research Paper Analysis Platform**
+**Backend API for RAG Scientific - AI-Powered Research Paper Analysis**
 
-[Features](#-features) • [Installation](#-installation) • [API Reference](#-api-reference) • [Architecture](#-architecture)
+[Quick Start](#-quick-start) • [Features](#-features) • [API Endpoints](#-api-endpoints)
 
 </div>
 
@@ -18,214 +17,217 @@
 
 ## 📋 Overview
 
-Backend API service cho hệ thống RAG Scientific, cung cấp:
+NestJS Backend API với các tính năng:
 
-- **User Management**: Xác thực đa nền tảng (Email/Password + Google OAuth 2.0)
-- **Paper Management**: Upload, organize và quản lý research papers
-- **Chat System**: Real-time Q&A với AI về nội dung papers
-- **Library Organization**: Folders, tags để tổ chức papers
-- **RAG Integration**: Kết nối với RAG_BE_02 Python service cho AI processing
+- User authentication (Email/Password + Google OAuth)
+- Paper management (upload PDF, organize với folders)
+- AI Chat với RAG integration
+- PDF highlighting & comments
+- Email service (password reset)
 
 ## ✨ Features
 
-| Feature                   | Description                               |
-| ------------------------- | ----------------------------------------- |
-| 🔐 **JWT Authentication** | Access/Refresh token với HttpOnly cookies |
-| 🔑 **Google OAuth 2.0**   | Đăng nhập nhanh qua Google                |
-| 📄 **Paper Upload**       | Upload PDF lên S3, trigger RAG ingest     |
-| 💬 **AI Chat**            | Single & Multi-paper Q&A với citations    |
-| 📁 **Folder System**      | Organize papers trong library             |
-| 🎯 **Guest Mode**         | Dùng thử không cần đăng ký                |
-| 📖 **Swagger API**        | Auto-generated documentation              |
-| 🗃️ **Prisma ORM**         | Type-safe database access                 |
-
-## 🏗 Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                          │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     NestJS Backend API                           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ │
-│  │   Auth   │ │  Papers  │ │   Chat   │ │ Folders  │ │ Upload │ │
-│  │ Module   │ │  Module  │ │  Module  │ │  Module  │ │ Module │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └───┬────┘ │
-│       │            │            │            │           │      │
-│       └────────────┴─────┬──────┴────────────┴───────────┘      │
-│                          │                                      │
-│                          ▼                                      │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    Prisma ORM Layer                         ││
-│  └─────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
-         │                                        │
-         ▼                                        ▼
-┌─────────────────┐                    ┌─────────────────────┐
-│   PostgreSQL    │                    │   RAG_BE_02 (Python) │
-│    Database     │                    │    FastAPI Service   │
-└─────────────────┘                    └─────────────────────┘
-                                                 │
-                                                 ▼
-                                       ┌─────────────────┐
-                                       │  S3 / MinIO     │
-                                       │  File Storage   │
-                                       └─────────────────┘
-```
+- 🔐 JWT Authentication (Access/Refresh tokens)
+- 🔑 Google OAuth 2.0
+- 📄 Paper upload & management (AWS S3)
+- 💬 AI Chat (single/multi-paper Q&A)
+- ✏️ PDF highlighting & comments
+- 📁 Folder organization
+- 📧 Password reset email (Resend)
+- 🎯 Guest mode (24h TTL auto-cleanup)
+- 📖 Swagger API documentation
+- 🗃️ Prisma ORM (type-safe database)
 
 ## 📋 Prerequisites
 
-- **Node.js**: >= 20.0.0
-- **npm**: >= 10.0.0
-- **PostgreSQL**: >= 12.0 (hoặc Docker Compose)
-- **RAG_BE_02**: Python service đang chạy (port 8000)
+- Node.js >= 20.0.0
+- npm >= 10.0.0
+- PostgreSQL >= 12.0
 
-## 🚀 Cài đặt
-
-### 1. Clone repository và cài đặt dependencies
+## ⚡ Quick Start
 
 ```bash
-cd rag-scientific-be
+# 1. Install dependencies
+npm install
+
+# 2. Setup environment
+cp .env.example .env
+# Sửa JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, DATABASE_URL trong .env
+
+# 3. Setup database
+npm run prisma:generate
+npm run prisma:migrate
+
+# 4. Start dev server
+npm run start:dev
+```
+
+**Truy cập:**
+
+- API: http://localhost:3000
+- Swagger: http://localhost:3000/api
+
+## 🚀 Installation
+
+### 1. Install Dependencies
+
+```bash
 npm install
 ```
 
-### 2. Cấu hình Environment Variables
+### 2. Environment Variables
 
-Tạo file `.env` ở thư mục root với nội dung:
+Tạo file `.env`:
+
+```bash
+cp .env.example .env
+```
+
+File `.env` cần có:
 
 ```env
-# Database Configuration (cho Docker Compose)
+# Database
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=rag_scientific
 POSTGRES_PORT=5432
 
-# Database Connection URL (phải khớp với các thông tin trên)
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/rag_scientific?schema=public"
+DATABASE_URL="postgresql://user:password@localhost:5432/rag_scientific?schema=public"
 
-# JWT Configuration
-JWT_SECRET="your-super-secret-jwt-key-change-this-in-production"
-JWT_ACCESS_EXPIRES="15m"
-JWT_REFRESH_EXPIRES="7d"
+# JWT (REQUIRED - Generate với: openssl rand -base64 32)
+JWT_ACCESS_SECRET="your-access-secret-here"
+JWT_ACCESS_EXPIRES_IN="15m"
+JWT_REFRESH_SECRET="your-refresh-secret-here"
+JWT_REFRESH_EXPIRES_IN="7d"
 
-# Application
+# Google OAuth (Optional)
+GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+
+# RAG Service (Python FastAPI)
+RAG_SERVICE_URL="http://localhost:8000"
+
+# Email (Resend)
+RESEND_API_KEY="re_your_resend_api_key"
+EMAIL_FROM="noreply@yourdomain.com"
+
+# Frontend URL
+FRONTEND_URL="http://localhost:5173"
+
+# AWS S3
+AWS_REGION="ap-southeast-1"
+AWS_S3_BUCKET="your-bucket-name"
+AWS_ACCESS_KEY_ID="your-aws-key"
+AWS_SECRET_ACCESS_KEY="your-aws-secret"
+
+# App Config
 PORT=3000
+NODE_ENV=development
+CORS_ORIGINS="http://localhost:5173"
+GUEST_FILE_TTL_HOURS="24"
 ```
 
-**Lưu ý**:
+**Quan trọng:**
 
-- Thay đổi các thông tin PostgreSQL (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) nếu cần
-- Thay đổi `JWT_SECRET` bằng một chuỗi ngẫu nhiên mạnh cho production (ví dụ: dùng `openssl rand -base64 32`)
-- Nếu không dùng Docker Compose, cập nhật `DATABASE_URL` theo cấu hình PostgreSQL của bạn
+- Generate JWT secrets: `openssl rand -base64 32`
+- Tạo database PostgreSQL: `rag_scientific`
+- Cấu hình AWS S3 bucket cho file upload
+- Resend API key cho email (password reset)
 
-### 3. Cấu hình Database
+### 3. Setup PostgreSQL Database
 
-#### Option 1: Sử dụng Docker Compose (Khuyên dùng)
+#### Option 1: Manual Setup
+
+Tạo database `rag_scientific` trong PostgreSQL của bạn, sau đó update `DATABASE_URL` trong `.env`.
+
+#### Option 2: Using Docker Compose
+
+Nếu bạn chưa có PostgreSQL, có thể sử dụng Docker Compose để setup database:
 
 ```bash
-# Khởi động PostgreSQL
-docker-compose up -d
+# Tạo file docker-compose.yml trong thư mục gốc
+# Nội dung file docker-compose.yml:
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag_scientific
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
-# Kiểm tra container đang chạy
-docker-compose ps
-
-# Xem logs
-docker-compose logs -f postgres
-
-# Dừng PostgreSQL
-docker-compose down
-
-# Dừng và xóa data
-docker-compose down -v
+volumes:
+  postgres_data:
 ```
 
-**Lưu ý**: Đảm bảo các biến môi trường `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` trong file `.env` khớp với `DATABASE_URL`.
+```bash
+# Chạy database
+docker-compose up -d
 
-#### Option 2: Cài đặt PostgreSQL thủ công
+# DATABASE_URL trong .env sẽ là:
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/rag_scientific?schema=public"
+```
 
-1. Cài đặt PostgreSQL trên máy local
-2. Tạo database: `rag_scientific`
-3. Cập nhật `DATABASE_URL` trong file `.env`
-
-### 4. Setup Prisma
+### 4. Prisma Migration
 
 ```bash
 # Generate Prisma Client
 npm run prisma:generate
 
-# Chạy migrations để tạo database schema
+# Chạy migrations (tạo tables trong database)
 npm run prisma:migrate
-
-# (Optional) Mở Prisma Studio để xem/quản lý data
-npm run prisma:studio
 ```
 
-## 🏃 Chạy ứng dụng
+**Prisma Commands:**
 
-### Development mode (với hot-reload)
+| Command                     | Mục đích                                  |
+| --------------------------- | ----------------------------------------- |
+| `npm run prisma:generate`   | Generate Prisma Client (TypeScript types) |
+| `npm run prisma:migrate`    | Tạo và apply migration mới                |
+| `npx prisma migrate dev`    | Development: tạo migration với tên        |
+| `npx prisma migrate reset`  | Reset DB (⚠️ xóa hết data)                |
+| `npm run prisma:studio`     | Mở Prisma Studio (GUI)                    |
+| `npx prisma migrate status` | Xem trạng thái migrations                 |
+
+**Workflow khi sửa schema:**
+
+```bash
+# 1. Sửa file prisma/schema.prisma
+
+# 2. Tạo migration mới
+npx prisma migrate dev --name ten_migration
+
+# 3. Prisma Client tự động regenerate
+```
+
+### 5. Run Development Server
 
 ```bash
 npm run start:dev
 ```
 
-Ứng dụng sẽ chạy tại: `http://localhost:3000`
+Server chạy tại: http://localhost:3000
 
-### Production mode
+## 📚 Swagger API Docs
 
-```bash
-# Build ứng dụng
-npm run build
+Truy cập: http://localhost:3000/api
 
-# Chạy production
-npm run start:prod
-```
+**Cách dùng:**
 
-### Debug mode
-
-```bash
-npm run start:debug
-```
-
-## 📚 API Documentation (Swagger)
-
-Sau khi chạy ứng dụng, truy cập Swagger UI tại:
-
-```
-http://localhost:3000/api
-```
-
-### Tính năng Swagger:
-
-- ✅ Xem tất cả API endpoints
-- ✅ Test API trực tiếp trên browser
-- ✅ JWT Authentication tích hợp
-- ✅ Schema validation và examples
-- ✅ Lưu authorization token tự động
-
-### Cách sử dụng JWT trong Swagger:
-
-1. Đăng ký/Đăng nhập để lấy token
-2. Click nút **"Authorize"** ở góc trên cùng
-3. Nhập token theo format: `Bearer <your-token>`
-4. Click **"Authorize"** và **"Close"**
-5. Token sẽ được tự động thêm vào các request cần authentication
+1. Đăng nhập để lấy token
+2. Click "Authorize" → nhập `Bearer <token>`
+3. Test API trực tiếp trên browser
 
 ## 🧪 Testing
 
 ```bash
-# Unit tests
-npm run test
-
-# E2E tests
-npm run test:e2e
-
-# Test coverage
-npm run test:cov
-
-# Watch mode
-npm run test:watch
+npm run test           # Unit tests
+npm run test:e2e       # E2E tests
+npm run test:cov       # Coverage
 ```
 
 ## 📁 Cấu trúc dự án
@@ -276,9 +278,32 @@ rag-scientific-be/
 │   │   ├── guest.controller.ts
 │   │   └── guest.service.ts
 │   │
+│   ├── highlight/              # ✏️ PDF highlighting & annotations
+│   │   ├── dto/               # Highlight, Comment DTOs
+│   │   ├── highlight.controller.ts
+│   │   ├── highlight.service.ts
+│   │   ├── comment.controller.ts
+│   │   └── comment.service.ts # Comment CRUD
+│   │
 │   ├── users/                  # 👥 User management
 │   │   ├── users.service.ts
 │   │   └── users.module.ts
+│   │
+│   ├── email/                  # 📧 Email service (password reset)
+│   │   ├── email.service.ts
+│   │   ├── email.module.ts
+│   │   ├── providers/         # Resend provider
+│   │   ├── templates/         # Email templates
+│   │   └── interfaces/
+│   │
+│   ├── cleanup/                # 🧹 Background cleanup service
+│   │   ├── cleanup.service.ts # Auto-delete guest files (24h TTL)
+│   │   └── cleanup.module.ts
+│   │
+│   ├── rag/                    # 🤖 RAG service integration
+│   │   ├── rag.service.ts     # HTTP client to RAG_BE_02
+│   │   ├── rag.module.ts
+│   │   └── dto/
 │   │
 │   ├── prisma/                 # 🗃️ Database access
 │   │   ├── prisma.service.ts
@@ -286,43 +311,14 @@ rag-scientific-be/
 │   │
 │   ├── common/                 # 🔧 Shared utilities
 │   │   ├── dto/               # ApiResponseDto
-│   │   └── decorators/        # @CurrentUser decorator
+│   │   ├── decorators/        # @CurrentUser decorator
+│   │   └── constants/         # App-wide constants
 │   │
 │   ├── app.module.ts           # Root module
 │   └── main.ts                 # Application entry point
 │
 ├── test/                       # E2E tests
-├── docker-compose.yml          # PostgreSQL container
 └── package.json
-```
-
-## 🔧 Các lệnh hữu ích
-
-### Development
-
-```bash
-npm run start:dev          # Chạy development mode với hot-reload
-npm run start:debug        # Chạy debug mode
-npm run build              # Build ứng dụng
-npm run format             # Format code với Prettier
-npm run lint               # Lint và fix code
-```
-
-### Database (Prisma)
-
-```bash
-npm run prisma:generate    # Generate Prisma Client
-npm run prisma:migrate     # Tạo và chạy migrations
-npm run prisma:studio      # Mở Prisma Studio (GUI để quản lý DB)
-```
-
-### Testing
-
-```bash
-npm run test               # Chạy unit tests
-npm run test:watch         # Chạy tests với watch mode
-npm run test:cov           # Test coverage report
-npm run test:e2e           # Chạy E2E tests
 ```
 
 ## 🔐 API Endpoints
@@ -338,6 +334,8 @@ npm run test:e2e           # Chạy E2E tests
 | `POST` | `/auth/refresh`         | Refresh access token         | ❌   |
 | `POST` | `/auth/logout`          | Đăng xuất                    | ✅   |
 | `GET`  | `/auth/me`              | Lấy thông tin user hiện tại  | ✅   |
+| `POST` | `/auth/forgot-password` | Gửi email reset mật khẩu     | ❌   |
+| `POST` | `/auth/reset-password`  | Reset mật khẩu với token     | ❌   |
 
 ### Papers (`/papers`)
 
@@ -349,6 +347,25 @@ npm run test:e2e           # Chạy E2E tests
 | `DELETE` | `/papers/:id`                     | Xóa paper                  | ✅   |
 | `GET`    | `/papers/:id/suggested-questions` | Câu hỏi gợi ý (brainstorm) | ✅   |
 | `GET`    | `/papers/:id/related-papers`      | Papers liên quan (arXiv)   | ✅   |
+
+### Highlights (`/papers/:paperId/highlights`, `/highlights`)
+
+| Method   | Endpoint                      | Description                     | Auth |
+| -------- | ----------------------------- | ------------------------------- | ---- |
+| `POST`   | `/papers/:paperId/highlights` | Tạo highlight trên paper        | ✅   |
+| `GET`    | `/papers/:paperId/highlights` | Danh sách highlights của paper  | ✅   |
+| `GET`    | `/highlights/:id`             | Chi tiết 1 highlight + comments | ✅   |
+| `PATCH`  | `/highlights/:id`             | Cập nhật highlight (color)      | ✅   |
+| `DELETE` | `/highlights/:id`             | Xóa highlight và comments       | ✅   |
+
+### Comments (`/highlights/:highlightId/comments`, `/comments`)
+
+| Method   | Endpoint                            | Description                | Auth |
+| -------- | ----------------------------------- | -------------------------- | ---- |
+| `POST`   | `/highlights/:highlightId/comments` | Thêm comment vào highlight | ✅   |
+| `GET`    | `/highlights/:highlightId/comments` | Danh sách comments         | ✅   |
+| `PATCH`  | `/comments/:id`                     | Cập nhật comment           | ✅   |
+| `DELETE` | `/comments/:id`                     | Xóa comment                | ✅   |
 
 ### Chat (`/chat`)
 
@@ -402,92 +419,49 @@ npm run test:e2e           # Chạy E2E tests
 | ------ | -------- | ------------ | ---- |
 | `GET`  | `/`      | Health check | ❌   |
 
-> 📖 **Swagger UI**: Xem chi tiết và test API tại `http://localhost:3000/api`
+> 📖 **Swagger UI**: http://localhost:3000/api
+
+## 🔧 Development Commands
+
+```bash
+# Development
+npm run start:dev       # Dev mode với hot-reload
+npm run start:debug     # Debug mode
+npm run build           # Build production
+npm run lint            # Lint code
+npm run format          # Format code (Prettier)
+
+# Database (Prisma)
+npm run prisma:generate # Generate Prisma Client
+npm run prisma:migrate  # Tạo migration mới
+npm run prisma:studio   # GUI quản lý DB (http://localhost:5555)
+npx prisma migrate reset # Reset DB (⚠️ xóa hết data)
+
+# Testing
+npm run test            # Unit tests
+npm run test:e2e        # E2E tests
+npm run test:cov        # Test coverage
+```
+
+## 📖 Database Schema
+
+Chi tiết schema, relationships, và design decisions:
+
+👉 **[docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md)**
 
 ## 🛠️ Tech Stack
 
-| Category           | Technology           |
-| ------------------ | -------------------- |
-| **Framework**      | NestJS 10 LTS        |
-| **Language**       | TypeScript 5.x       |
-| **Database**       | PostgreSQL 12+       |
-| **ORM**            | Prisma 6.x           |
-| **Authentication** | JWT + Passport.js    |
-| **OAuth**          | Google Auth Library  |
-| **File Storage**   | AWS S3 / MinIO       |
-| **Validation**     | class-validator, Zod |
-| **API Docs**       | Swagger/OpenAPI      |
-| **Testing**        | Jest                 |
-
-## 🔧 Environment Variables
-
-```env
-# Database
-DATABASE_URL="postgresql://user:pass@localhost:5432/rag_scientific?schema=public"
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=rag_scientific
-POSTGRES_PORT=5432
-
-# JWT
-JWT_SECRET="your-super-secret-key"
-JWT_ACCESS_EXPIRES="15m"
-JWT_REFRESH_EXPIRES="7d"
-
-# Google OAuth
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"
-
-# S3 / MinIO
-S3_ENDPOINT="http://localhost:9000"
-S3_ACCESS_KEY="minioadmin"
-S3_SECRET_KEY="minioadmin"
-S3_BUCKET="rag-scientific"
-S3_REGION="us-east-1"
-
-# RAG Service
-RAG_SERVICE_URL="http://localhost:8000"
-
-# Application
-PORT=3000
-NODE_ENV=development
-```
-
-## 📝 Notes
-
-- Đảm bảo PostgreSQL đang chạy trước khi start ứng dụng
-- RAG_BE_02 service cần chạy để các tính năng AI hoạt động
-- JWT tokens có thời gian hết hạn (mặc định: 15 phút cho access token)
-- Swagger UI chỉ khả dụng trong development mode
-
-## 🔗 Related Services
-
-| Service               | Port | Description               |
-| --------------------- | ---- | ------------------------- |
-| **rag-scientific-be** | 3000 | This service (NestJS API) |
-| **rag-scientific-fe** | 5173 | React Frontend            |
-| **RAG_BE_02**         | 8000 | Python RAG Service        |
-| **PostgreSQL**        | 5432 | Database                  |
-| **GROBID**            | 8070 | PDF Metadata Extraction   |
-| **MinIO**             | 9000 | S3-compatible Storage     |
-
-## 🤝 Contributing
-
-1. Fork the project
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License.
+- NestJS 10 + TypeScript 5
+- PostgreSQL + Prisma ORM
+- JWT + Passport.js
+- Google OAuth 2.0
+- AWS S3
+- Resend (email)
+- Swagger/OpenAPI
 
 ---
 
 <div align="center">
-
-**[⬆ Back to Top](#-rag-scientific---backend-api)**
 
 Made with ❤️ using NestJS
 

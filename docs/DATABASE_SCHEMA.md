@@ -72,6 +72,29 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 └─────────────────┘           │
                               │ N:M (for MULTI_PAPER)
                     ──────────┘
+
+┌─────────────────┐
+│   highlights    │
+├─────────────────┤
+│ id (PK)         │
+│ paper_id (FK)   │
+│ user_id (FK)    │
+│ page_number     │
+│ color           │
+│ ...             │
+└────────┬────────┘
+         │
+         │ 1:N
+         ▼
+┌─────────────────┐
+│ highlight_comments │
+├─────────────────────┤
+│ id (PK)             │
+│ highlight_id (FK)   │
+│ user_id (FK)        │
+│ content             │
+│ ...                 │
+└─────────────────────┘
 ```
 
 ---
@@ -116,19 +139,21 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 
 **Mục đích**: Lưu trữ thông tin tài khoản, hỗ trợ cả xác thực local và OAuth.
 
-| Column          | Type         | Constraints               | Mô tả                                 |
-| --------------- | ------------ | ------------------------- | ------------------------------------- |
-| `id`            | UUID         | PK, auto                  | ID duy nhất của user                  |
-| `email`         | VARCHAR(255) | UNIQUE, NOT NULL          | Email đăng nhập                       |
-| `password_hash` | VARCHAR(255) | NULL                      | Hash bcrypt (null nếu chỉ dùng OAuth) |
-| `provider`      | AuthProvider | NOT NULL, DEFAULT 'LOCAL' | Phương thức đăng ký                   |
-| `provider_id`   | VARCHAR(255) | NULL                      | ID từ OAuth provider (Google sub)     |
-| `display_name`  | VARCHAR(100) | NULL                      | Tên hiển thị                          |
-| `avatar_url`    | VARCHAR(500) | NULL                      | URL avatar (từ Google hoặc upload)    |
-| `is_active`     | BOOLEAN      | DEFAULT true              | Trạng thái tài khoản                  |
-| `last_login_at` | TIMESTAMPTZ  | NULL                      | Lần đăng nhập cuối                    |
-| `created_at`    | TIMESTAMPTZ  | DEFAULT NOW               | Ngày tạo                              |
-| `updated_at`    | TIMESTAMPTZ  | DEFAULT NOW               | Ngày cập nhật                         |
+| Column                      | Type         | Constraints               | Mô tả                                 |
+| --------------------------- | ------------ | ------------------------- | ------------------------------------- |
+| `id`                        | UUID         | PK, auto                  | ID duy nhất của user                  |
+| `email`                     | VARCHAR(255) | UNIQUE, NOT NULL          | Email đăng nhập                       |
+| `password_hash`             | VARCHAR(255) | NULL                      | Hash bcrypt (null nếu chỉ dùng OAuth) |
+| `provider`                  | AuthProvider | NOT NULL, DEFAULT 'LOCAL' | Phương thức đăng ký                   |
+| `provider_id`               | VARCHAR(255) | NULL                      | ID từ OAuth provider (Google sub)     |
+| `display_name`              | VARCHAR(100) | NULL                      | Tên hiển thị                          |
+| `avatar_url`                | VARCHAR(500) | NULL                      | URL avatar (từ Google hoặc upload)    |
+| `password_reset_token`      | VARCHAR(255) | NULL                      | Token reset mật khẩu                  |
+| `password_reset_expires_at` | TIMESTAMPTZ  | NULL                      | Thời điểm token reset hết hạn         |
+| `is_active`                 | BOOLEAN      | DEFAULT true              | Trạng thái tài khoản                  |
+| `last_login_at`             | TIMESTAMPTZ  | NULL                      | Lần đăng nhập cuối                    |
+| `created_at`                | TIMESTAMPTZ  | DEFAULT NOW               | Ngày tạo                              |
+| `updated_at`                | TIMESTAMPTZ  | DEFAULT NOW               | Ngày cập nhật                         |
 
 **Indexes**:
 
@@ -211,6 +236,7 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 | `title`           | VARCHAR(500)  | NULL                 | Tiêu đề (từ GROBID hoặc font-based extraction)                   |
 | `abstract`        | TEXT          | NULL                 | Tóm tắt (từ GROBID)                                              |
 | `authors`         | TEXT          | NULL                 | Tác giả - **JSON array string** (e.g., `["Author1", "Author2"]`) |
+| `summary`         | TEXT          | NULL                 | Tóm tắt paper được generate bởi LLM                              |
 | `num_pages`       | INTEGER       | NULL                 | Tổng số trang PDF (từ PyMuPDF)                                   |
 | `status`          | PaperStatus   | DEFAULT 'PENDING'    | Trạng thái xử lý                                                 |
 | `error_message`   | TEXT          | NULL                 | Chi tiết lỗi nếu FAILED                                          |
@@ -278,7 +304,7 @@ PENDING → PROCESSING → COMPLETED
 | ------------ | ---------------- | ---------------------- | ----------------------------- |
 | `id`         | UUID             | PK, auto               | ID conversation               |
 | `user_id`    | UUID             | FK → users, NOT NULL   | User tạo                      |
-| `paper_id`   | UUID             | FK → papers, NOT NULL  | Paper chính (required)        |
+| `paper_id`   | UUID             | FK → papers, NULL      | Paper chính (có thể null)     |
 | `title`      | VARCHAR(300)     | NULL                   | Tiêu đề (auto từ câu hỏi đầu) |
 | `type`       | ConversationType | DEFAULT 'SINGLE_PAPER' | Loại conversation             |
 | `created_at` | TIMESTAMPTZ      | DEFAULT NOW            | Ngày tạo                      |
@@ -365,15 +391,14 @@ PENDING → PROCESSING → COMPLETED
 
 ### 8. `suggested_questions` - Câu hỏi gợi ý
 
-**Mục đích**: Cache câu hỏi do AI generate (brainstorm feature) để không phải gọi API nhiều lần.
+**Mục đích**: Cache câu hỏi do AI generate (brainstorm feature) cho một conversation.
 
-| Column        | Type        | Constraints | Mô tả            |
-| ------------- | ----------- | ----------- | ---------------- |
-| `id`          | UUID        | PK, auto    | ID               |
-| `paper_id`    | UUID        | FK → papers | Paper liên quan  |
-| `question`    | TEXT        | NOT NULL    | Nội dung câu hỏi |
-| `order_index` | INTEGER     | NOT NULL    | Thứ tự hiển thị  |
-| `created_at`  | TIMESTAMPTZ | DEFAULT NOW | Ngày generate    |
+| Column            | Type        | Constraints        | Mô tả                  |
+| ----------------- | ----------- | ------------------ | ---------------------- |
+| `id`              | UUID        | PK, auto           | ID                     |
+| `conversation_id` | UUID        | FK → conversations | Conversation liên quan |
+| `question`        | TEXT        | NOT NULL           | Nội dung câu hỏi       |
+| `created_at`      | TIMESTAMPTZ | DEFAULT NOW        | Ngày generate          |
 
 **Business Rules**:
 
@@ -408,6 +433,51 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
+### 10. `highlights` - Highlight trên PDF
+
+**Mục đích**: Lưu trữ các vùng text được highlight trên PDF với thông tin vị trí và màu sắc.
+
+| Column            | Type           | Constraints           | Mô tả                                  |
+| ----------------- | -------------- | --------------------- | -------------------------------------- |
+| `id`              | UUID           | PK, auto              | ID highlight                           |
+| `paper_id`        | UUID           | FK → papers, NOT NULL | Paper chứa highlight                   |
+| `user_id`         | UUID           | FK → users, NOT NULL  | User tạo highlight                     |
+| `page_number`     | INTEGER        | NOT NULL              | Số trang PDF                           |
+| `selection_rects` | JSONB          | NOT NULL              | Tọa độ vùng chọn (PDF.js format)       |
+| `selected_text`   | TEXT           | NOT NULL              | Nội dung text được highlight           |
+| `text_prefix`     | VARCHAR(100)   | NULL                  | Text trước highlight (fallback anchor) |
+| `text_suffix`     | VARCHAR(100)   | NULL                  | Text sau highlight (fallback anchor)   |
+| `color`           | HighlightColor | DEFAULT 'YELLOW'      | Màu highlight                          |
+| `created_at`      | TIMESTAMPTZ    | DEFAULT NOW           | Ngày tạo                               |
+| `updated_at`      | TIMESTAMPTZ    | DEFAULT NOW           | Ngày cập nhật                          |
+
+**HighlightColor Enum**:
+
+| Value    | Mô tả          |
+| -------- | -------------- |
+| `YELLOW` | Màu vàng       |
+| `GREEN`  | Màu xanh lá    |
+| `BLUE`   | Màu xanh dương |
+| `PINK`   | Màu hồng       |
+| `ORANGE` | Màu cam        |
+
+---
+
+### 11. `highlight_comments` - Comment trên highlight
+
+**Mục đích**: Lưu trữ comments được thêm vào các highlights.
+
+| Column         | Type        | Constraints               | Mô tả                  |
+| -------------- | ----------- | ------------------------- | ---------------------- |
+| `id`           | UUID        | PK, auto                  | ID comment             |
+| `highlight_id` | UUID        | FK → highlights, NOT NULL | Highlight được comment |
+| `user_id`      | UUID        | FK → users, NOT NULL      | User tạo comment       |
+| `content`      | TEXT        | NOT NULL                  | Nội dung comment       |
+| `created_at`   | TIMESTAMPTZ | DEFAULT NOW               | Ngày tạo               |
+| `updated_at`   | TIMESTAMPTZ | DEFAULT NOW               | Ngày cập nhật          |
+
+---
+
 ## 🔄 Cascade Rules
 
 | Parent        | Child               | On Delete            |
@@ -416,12 +486,17 @@ PENDING → PROCESSING → COMPLETED
 | users         | folders             | CASCADE              |
 | users         | papers              | CASCADE              |
 | users         | conversations       | CASCADE              |
+| users         | highlights          | CASCADE              |
+| users         | highlight_comments  | CASCADE              |
 | folders       | papers              | SET NULL ← Đặc biệt! |
 | papers        | conversations       | CASCADE              |
 | papers        | suggested_questions | CASCADE              |
 | papers        | related_papers      | CASCADE              |
+| papers        | highlights          | CASCADE              |
 | conversations | messages            | CASCADE              |
+| conversations | suggested_questions | CASCADE              |
 | conversations | conversation_papers | CASCADE              |
+| highlights    | highlight_comments  | CASCADE              |
 
 **Lưu ý**: Xóa folder chỉ SET NULL `folder_id` của papers, không xóa papers.
 
@@ -436,6 +511,8 @@ PENDING → PROCESSING → COMPLETED
 3. **RAG lookup**: `papers_rag_file_id_idx`
 4. **Conversation history**: `conversations_user_id_idx`, `messages_conversation_id_idx`
 5. **Token cleanup**: `refresh_tokens_expires_at_idx`
+6. **Highlights by paper**: `highlights_paper_id_idx`, `highlights_paper_id_page_number_idx`
+7. **Comments by highlight**: `highlight_comments_highlight_id_idx`
 
 ---
 
@@ -496,7 +573,7 @@ def get_file_hash(self) -> str:
 
 These tables are **owned and managed by RAG_BE_02** (Python/FastAPI), NOT by the NestJS backend.
 
-### 10. `rag_paper_cache` - RAG Processing Cache
+### 12. `rag_paper_cache` - RAG Processing Cache
 
 **Mục đích**: Lưu hash của PDF để detect khi file thay đổi và cần re-ingest vector store.
 
@@ -517,7 +594,7 @@ These tables are **owned and managed by RAG_BE_02** (Python/FastAPI), NOT by the
 4. Save new hash after successful ingestion
 ```
 
-### 11. `paper_content_summaries` - LLM Summary Cache
+### 13. `paper_content_summaries` - LLM Summary Cache
 
 **Mục đích**: Cache các LLM-generated summaries cho tables và images để tránh gọi API nhiều lần.
 
@@ -582,10 +659,23 @@ npx prisma migrate status
 
 4. **Metadata Extraction**:
    - `title`, `authors`, `abstract`: Extracted by GROBID or fallback parser
+   - `summary`: LLM-generated paper summary (optional)
    - `num_pages`: Always extracted via PyMuPDF
    - `authors` stored as JSON array string: `["Author 1", "Author 2"]`
 
-5. **Cleanup Jobs (Recommended)**:
+5. **Password Reset Flow**:
+   - `password_reset_token`: Generated on forgot password request
+   - `password_reset_expires_at`: Token expires in 1 hour
+   - Token is hashed before storing for security
+
+6. **Highlights & Annotations**:
+   - `selection_rects`: PDF.js selection data for precise re-rendering
+   - `text_prefix`/`text_suffix`: Fallback anchors for text-based re-finding
+   - `color`: User preference for highlight appearance
+   - Comments are threaded on highlights (1:N relationship)
+
+7. **Cleanup Jobs (Recommended)**:
    - Expired refresh tokens: Daily
    - Failed papers older than 7 days: Weekly
    - Orphaned files in S3: Monthly
+   - Expired password reset tokens: Hourly
