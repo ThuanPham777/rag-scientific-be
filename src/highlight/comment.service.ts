@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SessionGateway } from '../session/session.gateway';
 import {
   CreateCommentDto,
   UpdateCommentDto,
@@ -17,29 +18,86 @@ import {
 export class CommentService {
   private readonly logger = new Logger(CommentService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private sessionGateway: SessionGateway,
+  ) {}
+
+  // =========================================================================
+  // ACCESS HELPERS
+  // =========================================================================
 
   /**
-   * Create a comment on a highlight
+   * Verify user has access to a highlight (owner of paper OR session member).
+   * Returns the highlight and the collaborative conversationId if applicable.
    */
-  async create(
+  private async verifyHighlightAccess(
     userId: string,
     highlightId: string,
-    dto: CreateCommentDto,
-  ): Promise<CommentItemDto> {
-    // Verify highlight exists and user owns it
+  ): Promise<{
+    highlight: { id: string; userId: string; paperId: string };
+    conversationId?: string;
+  }> {
     const highlight = await this.prisma.highlight.findUnique({
       where: { id: highlightId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, paperId: true },
     });
 
     if (!highlight) {
       throw new NotFoundException('Highlight not found');
     }
 
-    if (highlight.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this highlight');
+    // Paper owner always has access
+    const paper = await this.prisma.paper.findUnique({
+      where: { id: highlight.paperId },
+      select: { userId: true },
+    });
+
+    if (paper?.userId === userId) {
+      return { highlight };
     }
+
+    // Highlight creator always has access
+    if (highlight.userId === userId) {
+      return { highlight };
+    }
+
+    // Check if user is a member of a collaborative session for this paper
+    const collaborativeConv = await this.prisma.conversation.findFirst({
+      where: {
+        paperId: highlight.paperId,
+        isCollaborative: true,
+        sessionMembers: {
+          some: { userId, isActive: true },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (collaborativeConv) {
+      return { highlight, conversationId: collaborativeConv.id };
+    }
+
+    throw new ForbiddenException('You do not have access to this highlight');
+  }
+
+  // =========================================================================
+  // CRUD
+  // =========================================================================
+
+  /**
+   * Create a comment on a highlight.
+   * Accessible by paper owner, highlight creator, or collaborative session members.
+   */
+  async create(
+    userId: string,
+    highlightId: string,
+    dto: CreateCommentDto,
+  ): Promise<CommentItemDto> {
+    const { conversationId } = await this.verifyHighlightAccess(
+      userId,
+      highlightId,
+    );
 
     const comment = await this.prisma.highlightComment.create({
       data: {
@@ -47,53 +105,53 @@ export class CommentService {
         userId,
         content: dto.content,
       },
+      include: {
+        user: { select: { id: true, displayName: true, avatarUrl: true } },
+      },
     });
 
     this.logger.log(
       `Created comment ${comment.id} on highlight ${highlightId} by user ${userId}`,
     );
 
-    return comment as CommentItemDto;
+    // Broadcast to collaborative session if applicable
+    if (conversationId) {
+      this.sessionGateway.broadcastCommentEvent(conversationId, comment);
+    }
+
+    return comment as unknown as CommentItemDto;
   }
 
   /**
-   * Get all comments for a highlight
+   * Get all comments for a highlight.
+   * Accessible by paper owner, highlight creator, or collaborative session members.
    */
   async findByHighlight(
     userId: string,
     highlightId: string,
   ): Promise<CommentItemDto[]> {
-    // Verify highlight exists and user owns it
-    const highlight = await this.prisma.highlight.findUnique({
-      where: { id: highlightId },
-      select: { id: true, userId: true },
-    });
-
-    if (!highlight) {
-      throw new NotFoundException('Highlight not found');
-    }
-
-    if (highlight.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this highlight');
-    }
+    await this.verifyHighlightAccess(userId, highlightId);
 
     const comments = await this.prisma.highlightComment.findMany({
       where: { highlightId },
+      include: {
+        user: { select: { id: true, displayName: true, avatarUrl: true } },
+      },
       orderBy: { createdAt: 'asc' },
     });
 
-    return comments as CommentItemDto[];
+    return comments as unknown as CommentItemDto[];
   }
 
   /**
-   * Update a comment
+   * Update a comment.
+   * Only the comment creator can update it.
    */
   async update(
     userId: string,
     commentId: string,
     dto: UpdateCommentDto,
   ): Promise<CommentItemDto> {
-    // Verify comment exists and user owns it
     const existing = await this.prisma.highlightComment.findUnique({
       where: { id: commentId },
       select: { id: true, userId: true },
@@ -104,7 +162,7 @@ export class CommentService {
     }
 
     if (existing.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this comment');
+      throw new ForbiddenException('Only the comment creator can update it');
     }
 
     const comment = await this.prisma.highlightComment.update({
@@ -120,24 +178,49 @@ export class CommentService {
   }
 
   /**
-   * Delete a comment
+   * Delete a comment.
+   * Only the comment creator (or session owner) can delete it.
    */
   async delete(
     userId: string,
     commentId: string,
   ): Promise<DeleteCommentResultDto> {
-    // Verify comment exists and user owns it
     const existing = await this.prisma.highlightComment.findUnique({
       where: { id: commentId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, highlightId: true },
     });
 
     if (!existing) {
       throw new NotFoundException('Comment not found');
     }
 
+    // Allow deletion by comment creator
     if (existing.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this comment');
+      // Also allow session owner to delete any comment
+      const highlight = await this.prisma.highlight.findUnique({
+        where: { id: existing.highlightId },
+        select: { paperId: true },
+      });
+
+      if (highlight) {
+        const sessionOwnerConv = await this.prisma.conversation.findFirst({
+          where: {
+            paperId: highlight.paperId,
+            isCollaborative: true,
+            sessionMembers: {
+              some: { userId, role: 'OWNER', isActive: true },
+            },
+          },
+        });
+
+        if (!sessionOwnerConv) {
+          throw new ForbiddenException(
+            'Only the comment creator or session owner can delete this comment',
+          );
+        }
+      } else {
+        throw new ForbiddenException('You do not have access to this comment');
+      }
     }
 
     await this.prisma.highlightComment.delete({

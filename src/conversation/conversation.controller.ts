@@ -70,13 +70,13 @@ export class ConversationController {
   @ApiQuery({
     name: 'type',
     required: false,
-    enum: ['SINGLE_PAPER', 'MULTI_PAPER'],
+    enum: ['SINGLE_PAPER', 'MULTI_PAPER', 'GROUP'],
     description: 'Filter by conversation type',
   })
   async list(
     @CurrentUser() user: any,
     @Query('paperId') paperId?: string,
-    @Query('type') type?: 'SINGLE_PAPER' | 'MULTI_PAPER',
+    @Query('type') type?: 'SINGLE_PAPER' | 'MULTI_PAPER' | 'GROUP',
   ): Promise<ListConversationsResponseDto> {
     const data = await this.conversationService.listConversations(
       user.id,

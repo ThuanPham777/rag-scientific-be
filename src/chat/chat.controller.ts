@@ -25,6 +25,7 @@ import {
 } from './dto/ask-multi-paper-request.dto';
 import { GetMessagesResponseDto } from './dto/get-messages-response.dto';
 import { ClearHistoryResponseDto } from './dto/clear-history-response.dto';
+import { SendMessageRequestDto } from './dto/send-message-request.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ExplainRegionRequestDto } from './dto/explain-region-request.dto';
 import {
@@ -57,6 +58,20 @@ export class ChatController {
       data,
       'Answer generated',
     ) as AskQuestionResponseDto;
+  }
+
+  @Post('send-message')
+  @ApiOperation({
+    summary: 'Send a plain chat message (no AI response)',
+    description:
+      'Send a message in a collaborative session without triggering AI. The message is saved and broadcast via WebSocket.',
+  })
+  async sendMessage(
+    @CurrentUser() user: any,
+    @Body() dto: SendMessageRequestDto,
+  ) {
+    const data = await this.chatService.sendMessage(user.id, dto);
+    return ApiResponseDto.success(data, 'Message sent');
   }
 
   @Post('ask-multi')

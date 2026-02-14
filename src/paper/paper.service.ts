@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
 import { RagService } from '../rag/index';
+import { SessionService } from '../session/session.service';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { PaperItemDto } from './dto/create-paper-response.dto';
 import { RelatedPapersResultDto } from './dto/related-papers.dto';
@@ -15,6 +16,7 @@ export class PaperService {
     private readonly prisma: PrismaService,
     private readonly ragService: RagService,
     private readonly s3Service: S3Service,
+    private readonly sessionService: SessionService,
   ) {}
 
   private mapToPaperItem(p: any): PaperItemDto {
@@ -58,7 +60,6 @@ export class PaperService {
         fileHash: dto.fileHash,
         ragFileId,
         status: 'PENDING',
-        folderId: dto.folderId || null,
       },
     });
 
@@ -116,7 +117,7 @@ export class PaperService {
   }
 
   /**
-   * List all papers for a user
+   * List all papers for a user (owned + shared via collaborative sessions)
    * @returns Raw array of papers
    */
   async listMyPapers(
@@ -128,7 +129,23 @@ export class PaperService {
     nextCursor?: string;
   }> {
     const papers = await this.prisma.paper.findMany({
-      where: { userId },
+      where: {
+        OR: [
+          // Papers owned by the user
+          { userId },
+          // Papers shared via collaborative sessions
+          {
+            conversations: {
+              some: {
+                isCollaborative: true,
+                sessionMembers: {
+                  some: { userId, isActive: true },
+                },
+              },
+            },
+          },
+        ],
+      },
       take: limit + 1, // lấy dư 1 record
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
@@ -152,12 +169,30 @@ export class PaperService {
 
   /**
    * Get paper by ID
+   * Access: owner, PaperShare, or session member
    * @returns Raw paper item
    */
   async getPaperById(userId: string, id: string): Promise<PaperItemDto> {
-    const paper = await this.prisma.paper.findFirst({
+    // Try ownership first
+    let paper = await this.prisma.paper.findFirst({
       where: { id, userId },
     });
+
+    // If not found as owner, check session membership on any collaborative conversation for this paper
+    if (!paper) {
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { paperId: id, isCollaborative: true },
+      });
+      if (conversation) {
+        const { hasAccess } = await this.sessionService.checkAccess(
+          userId,
+          conversation.id,
+        );
+        if (hasAccess) {
+          paper = await this.prisma.paper.findFirst({ where: { id } });
+        }
+      }
+    }
 
     if (!paper) {
       throw new NotFoundException('Paper not found');

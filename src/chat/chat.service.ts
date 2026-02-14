@@ -16,6 +16,8 @@ import {
 import { AskMultiPaperResultDto } from './dto/ask-multi-paper-request.dto';
 import { MessageItemDto } from './dto/get-messages-response.dto';
 import { MessageRole, ConversationType } from '../../generated/prisma/client';
+import { SessionService } from '../session/session.service';
+import { SessionGateway } from '../session/session.gateway';
 
 @Injectable()
 export class ChatService {
@@ -23,6 +25,8 @@ export class ChatService {
     private readonly prisma: PrismaService,
     private readonly ragService: RagService,
     private readonly s3Service: S3Service,
+    private readonly sessionService: SessionService,
+    private readonly sessionGateway: SessionGateway,
   ) {}
 
   private mapCitation(
@@ -68,6 +72,89 @@ export class ChatService {
   }
 
   /**
+   * Send a plain chat message (no AI response).
+   * Used in collaborative sessions when user doesn't @Assistant.
+   */
+  async sendMessage(
+    userId: string,
+    dto: { conversationId: string; content: string },
+  ): Promise<{
+    id: string;
+    content: string;
+    userId: string;
+    displayName: string;
+    createdAt: Date;
+  }> {
+    const { conversationId, content } = dto;
+
+    // Verify conversation access
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (!conversation.isCollaborative) {
+      throw new BadRequestException(
+        'Plain messages are only supported in collaborative sessions',
+      );
+    }
+
+    // Check access
+    const { hasAccess } = await this.sessionService.checkAccess(
+      userId,
+      conversationId,
+    );
+    if (!hasAccess) {
+      throw new ForbiddenException('You are not a member of this session');
+    }
+
+    // Create user message
+    const userMessage = await this.prisma.message.create({
+      data: {
+        conversationId,
+        userId,
+        role: MessageRole.USER,
+        content,
+      },
+    });
+
+    // Update conversation timestamp
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+    });
+
+    // Get sender info
+    const senderUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true },
+    });
+
+    const displayName = senderUser?.displayName || 'User';
+
+    // Broadcast via WebSocket
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: userMessage.id,
+      role: 'USER',
+      content,
+      userId,
+      displayName,
+      createdAt: userMessage.createdAt,
+    });
+
+    return {
+      id: userMessage.id,
+      content,
+      userId,
+      displayName,
+      createdAt: userMessage.createdAt,
+    };
+  }
+
+  /**
    * Ask a question about a paper
    * @returns Raw question result
    */
@@ -77,13 +164,26 @@ export class ChatService {
   ): Promise<AskQuestionResultDto> {
     const { conversationId, question, imageUrl } = dto;
 
-    // 1. Verify conversation ownership and get paper info
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, userId },
+    // 1. Verify conversation access (owner or session member)
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
       include: { paper: true },
     });
 
     if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Check access: owner or collaborative session member
+    if (conversation.isCollaborative) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException('You are not a member of this session');
+      }
+    } else if (conversation.userId !== userId) {
       throw new ForbiddenException(
         'Conversation not found or not owned by user',
       );
@@ -93,22 +193,39 @@ export class ChatService {
       throw new NotFoundException('Paper has not been processed by RAG system');
     }
 
-    // 2. Create user message
+    // 2. GROUP chat: require @Assistant mention to trigger AI
+    //    SINGLE/MULTI chat: AI always responds (no @Assistant needed)
+    if (conversation.isCollaborative) {
+      const hasAssistantMention = /^@Assistant\b/i.test(question);
+      if (!hasAssistantMention) {
+        throw new BadRequestException(
+          'In group chat, prefix your message with @Assistant to get an AI response. ' +
+            'For plain messages, use the send-message endpoint.',
+        );
+      }
+    }
+
+    // 3. Create user message (with userId for collaborative tracking)
+    // Store original content (including @Assistant prefix if present)
     const userMessage = await this.prisma.message.create({
       data: {
         conversationId,
+        userId,
         role: MessageRole.USER,
         content: question,
         imageUrl: imageUrl || null,
       },
     });
 
-    // 3. Call RAG service via centralized RagService
+    // 4. Strip @Assistant prefix for RAG query (keep original in stored message)
+    const ragQuestion = question.replace(/^@Assistant\s*/i, '').trim();
+
+    // 5. Call RAG service via centralized RagService
     let ragResponse;
     try {
       ragResponse = await this.ragService.query(
         conversation.paper.ragFileId,
-        question,
+        ragQuestion,
       );
     } catch (error) {
       // Create error message and throw
@@ -129,7 +246,7 @@ export class ChatService {
     const modelName = ragResponse.context?.model_name || 'rag-model';
     const tokenCount = ragResponse.context?.token_count || 0;
 
-    // 4. Create assistant message with context stored as JSON
+    // 6. Create assistant message with context stored as JSON
     const assistantMessage = await this.prisma.message.create({
       data: {
         conversationId,
@@ -143,13 +260,41 @@ export class ChatService {
       },
     });
 
-    // 5. Update conversation timestamp
+    // 7. Update conversation timestamp
     await this.prisma.conversation.update({
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
 
-    // 6. Build and return raw result
+    // 7b. Broadcast to collaborative session if applicable
+    if (conversation.isCollaborative) {
+      // Broadcast user message
+      const senderUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { displayName: true },
+      });
+
+      this.sessionGateway.broadcastMessage(conversationId, {
+        id: userMessage.id,
+        role: 'USER',
+        content: question,
+        userId,
+        displayName: senderUser?.displayName || 'User',
+        imageUrl: imageUrl || undefined,
+        createdAt: userMessage.createdAt,
+      });
+
+      // Broadcast assistant message
+      this.sessionGateway.broadcastMessage(conversationId, {
+        id: assistantMessage.id,
+        role: 'ASSISTANT',
+        content: answerText,
+        context: ragResponse.context,
+        createdAt: assistantMessage.createdAt,
+      });
+    }
+
+    // 8. Build and return raw result
     const result = new AskQuestionResultDto();
     result.answer = answerText;
     result.citations = rawCitations.map((c: any) => this.mapCitation(c));
@@ -171,11 +316,24 @@ export class ChatService {
     cursor?: string,
     limit: number = 20,
   ) {
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, userId },
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
     });
 
     if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Check access: owner or collaborative session member
+    if (conversation.isCollaborative) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException('You are not a member of this session');
+      }
+    } else if (conversation.userId !== userId) {
       throw new ForbiddenException(
         'Conversation not found or not owned by user',
       );
@@ -197,6 +355,10 @@ export class ChatService {
         tokenCount: true,
         context: true,
         createdAt: true,
+        userId: true,
+        user: conversation.isCollaborative
+          ? { select: { displayName: true } }
+          : false,
       },
     });
 
@@ -268,6 +430,8 @@ export class ChatService {
         modelName: msg.modelName,
         tokenCount: msg.tokenCount,
         createdAt: msg.createdAt,
+        userId: msg.userId ?? undefined,
+        displayName: (msg as any).user?.displayName ?? undefined,
       };
 
       if (msg.role === 'ASSISTANT' && msg.context) {

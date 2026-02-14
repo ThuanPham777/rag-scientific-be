@@ -3,9 +3,10 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { S3Service } from '../upload/s3.service';
+import { SessionModule } from '../session/session.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SessionModule],
   controllers: [ChatController],
   providers: [ChatService, S3Service],
 })

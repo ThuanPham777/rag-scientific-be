@@ -45,6 +45,18 @@ export class MessageItemDto {
   createdAt: Date;
 
   @ApiPropertyOptional({
+    description: 'User ID who sent the message (collaborative sessions)',
+    example: 'uuid-here',
+  })
+  userId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Display name of the sender (collaborative sessions)',
+    example: 'John Doe',
+  })
+  displayName?: string;
+
+  @ApiPropertyOptional({
     type: [ChatCitationDto],
     description: 'Citations for assistant messages',
   })
