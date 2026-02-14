@@ -116,7 +116,11 @@ export class CommentService {
 
     // Broadcast to collaborative session if applicable
     if (conversationId) {
-      this.sessionGateway.broadcastCommentEvent(conversationId, comment);
+      this.sessionGateway.broadcastCommentEvent(
+        conversationId,
+        'added',
+        comment,
+      );
     }
 
     return comment as unknown as CommentItemDto;
@@ -154,7 +158,7 @@ export class CommentService {
   ): Promise<CommentItemDto> {
     const existing = await this.prisma.highlightComment.findUnique({
       where: { id: commentId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, highlightId: true },
     });
 
     if (!existing) {
@@ -170,11 +174,36 @@ export class CommentService {
       data: {
         content: dto.content,
       },
+      include: {
+        user: { select: { id: true, displayName: true, avatarUrl: true } },
+      },
     });
 
     this.logger.log(`Updated comment ${commentId} by user ${userId}`);
 
-    return comment as CommentItemDto;
+    // Broadcast to collaborative session if applicable
+    const highlight = await this.prisma.highlight.findUnique({
+      where: { id: existing.highlightId },
+      select: { paperId: true },
+    });
+    if (highlight) {
+      const collaborativeConv = await this.prisma.conversation.findFirst({
+        where: {
+          paperId: highlight.paperId,
+          isCollaborative: true,
+        },
+        select: { id: true },
+      });
+      if (collaborativeConv) {
+        this.sessionGateway.broadcastCommentEvent(
+          collaborativeConv.id,
+          'updated',
+          comment,
+        );
+      }
+    }
+
+    return comment as unknown as CommentItemDto;
   }
 
   /**
@@ -228,6 +257,28 @@ export class CommentService {
     });
 
     this.logger.log(`Deleted comment ${commentId} by user ${userId}`);
+
+    // Broadcast to collaborative session if applicable
+    const highlightForBroadcast = await this.prisma.highlight.findUnique({
+      where: { id: existing.highlightId },
+      select: { paperId: true },
+    });
+    if (highlightForBroadcast) {
+      const collaborativeConv = await this.prisma.conversation.findFirst({
+        where: {
+          paperId: highlightForBroadcast.paperId,
+          isCollaborative: true,
+        },
+        select: { id: true },
+      });
+      if (collaborativeConv) {
+        this.sessionGateway.broadcastCommentEvent(
+          collaborativeConv.id,
+          'deleted',
+          { id: commentId, highlightId: existing.highlightId },
+        );
+      }
+    }
 
     return {
       message: 'Comment deleted successfully',

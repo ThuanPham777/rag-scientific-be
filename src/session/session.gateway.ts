@@ -292,12 +292,16 @@ export class SessionGateway
   }
 
   /**
-   * Broadcast comment event to all session participants.
+   * Broadcast comment events to all session participants.
    */
-  broadcastCommentEvent(conversationId: string, comment: any) {
+  broadcastCommentEvent(
+    conversationId: string,
+    eventType: 'added' | 'updated' | 'deleted',
+    comment: any,
+  ) {
     this.server
       .to(`session:${conversationId}`)
-      .emit('session:comment-added', comment);
+      .emit(`session:comment-${eventType}`, comment);
   }
 
   /**
