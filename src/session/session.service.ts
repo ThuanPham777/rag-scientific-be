@@ -110,6 +110,30 @@ export class SessionService {
         },
       });
 
+      // Clone messages from source conversation (if provided)
+      if (dto.sourceConversationId) {
+        const sourceMessages = await tx.message.findMany({
+          where: { conversationId: dto.sourceConversationId },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (sourceMessages.length > 0) {
+          await tx.message.createMany({
+            data: sourceMessages.map((msg) => ({
+              conversationId: conversation.id,
+              userId: msg.userId,
+              role: msg.role,
+              content: msg.content,
+              imageUrl: msg.imageUrl,
+              modelName: msg.modelName,
+              tokenCount: msg.tokenCount,
+              context: msg.context ?? undefined,
+              createdAt: msg.createdAt,
+            })),
+          });
+        }
+      }
+
       return { clonedPaper, conversation };
     });
 

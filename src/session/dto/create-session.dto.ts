@@ -10,6 +10,14 @@ export class CreateSessionDto {
   paperId: string;
 
   @ApiPropertyOptional({
+    description:
+      'Source conversation ID to clone messages from (single-paper chat)',
+  })
+  @IsOptional()
+  @IsUUID()
+  sourceConversationId?: string;
+
+  @ApiPropertyOptional({
     description: 'Max members allowed (default 10)',
     default: 10,
   })
