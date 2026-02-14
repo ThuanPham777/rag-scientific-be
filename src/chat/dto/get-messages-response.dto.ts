@@ -57,6 +57,12 @@ export class MessageItemDto {
   displayName?: string;
 
   @ApiPropertyOptional({
+    description: 'Avatar URL of the sender (collaborative sessions)',
+    example: 'https://lh3.googleusercontent.com/a/photo.jpg',
+  })
+  avatarUrl?: string;
+
+  @ApiPropertyOptional({
     type: [ChatCitationDto],
     description: 'Citations for assistant messages',
   })

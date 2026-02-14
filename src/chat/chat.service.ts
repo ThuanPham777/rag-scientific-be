@@ -83,6 +83,7 @@ export class ChatService {
     content: string;
     userId: string;
     displayName: string;
+    avatarUrl?: string;
     createdAt: Date;
   }> {
     const { conversationId, content } = dto;
@@ -130,10 +131,11 @@ export class ChatService {
     // Get sender info
     const senderUser = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { displayName: true },
+      select: { displayName: true, avatarUrl: true },
     });
 
     const displayName = senderUser?.displayName || 'User';
+    const avatarUrl = senderUser?.avatarUrl || undefined;
 
     // Broadcast via WebSocket
     this.sessionGateway.broadcastMessage(conversationId, {
@@ -142,6 +144,7 @@ export class ChatService {
       content,
       userId,
       displayName,
+      avatarUrl,
       createdAt: userMessage.createdAt,
     });
 
@@ -150,6 +153,7 @@ export class ChatService {
       content,
       userId,
       displayName,
+      avatarUrl,
       createdAt: userMessage.createdAt,
     };
   }
@@ -271,7 +275,7 @@ export class ChatService {
       // Broadcast user message
       const senderUser = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { displayName: true },
+        select: { displayName: true, avatarUrl: true },
       });
 
       this.sessionGateway.broadcastMessage(conversationId, {
@@ -280,6 +284,7 @@ export class ChatService {
         content: question,
         userId,
         displayName: senderUser?.displayName || 'User',
+        avatarUrl: senderUser?.avatarUrl || undefined,
         imageUrl: imageUrl || undefined,
         createdAt: userMessage.createdAt,
       });
@@ -357,7 +362,7 @@ export class ChatService {
         createdAt: true,
         userId: true,
         user: conversation.isCollaborative
-          ? { select: { displayName: true } }
+          ? { select: { displayName: true, avatarUrl: true } }
           : false,
       },
     });
@@ -422,6 +427,7 @@ export class ChatService {
     }
 
     const mappedMessages: MessageItemDto[] = messages.map((msg) => {
+      const userRel = (msg as any).user;
       const base: MessageItemDto = {
         id: msg.id,
         role: msg.role,
@@ -431,7 +437,8 @@ export class ChatService {
         tokenCount: msg.tokenCount,
         createdAt: msg.createdAt,
         userId: msg.userId ?? undefined,
-        displayName: (msg as any).user?.displayName ?? undefined,
+        displayName: userRel?.displayName ?? undefined,
+        avatarUrl: userRel?.avatarUrl ?? undefined,
       };
 
       if (msg.role === 'ASSISTANT' && msg.context) {
@@ -481,14 +488,27 @@ export class ChatService {
     let conversation: any;
     let conversationId = dto.conversationId;
 
-    // If conversationId provided, verify ownership
+    // If conversationId provided, verify access (owner or session member)
     if (conversationId) {
-      conversation = await this.prisma.conversation.findFirst({
-        where: { id: conversationId, userId },
+      conversation = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
         include: { paper: true },
       });
 
       if (!conversation) {
+        throw new NotFoundException('Conversation not found');
+      }
+
+      // Check access: owner or collaborative session member
+      if (conversation.isCollaborative) {
+        const { hasAccess } = await this.sessionService.checkAccess(
+          userId,
+          conversationId,
+        );
+        if (!hasAccess) {
+          throw new ForbiddenException('You are not a member of this session');
+        }
+      } else if (conversation.userId !== userId) {
         throw new ForbiddenException(
           'Conversation not found or not owned by user',
         );
@@ -546,6 +566,7 @@ export class ChatService {
     const userMessage = await this.prisma.message.create({
       data: {
         conversationId,
+        userId,
         role: MessageRole.USER,
         content: dto.question || 'Please explain this region.',
         imageUrl: imageUrl,
@@ -585,6 +606,33 @@ export class ChatService {
     });
 
     // Build and return raw result
+    // Broadcast to collaborative session if applicable
+    if (conversation.isCollaborative) {
+      const senderUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { displayName: true, avatarUrl: true },
+      });
+
+      this.sessionGateway.broadcastMessage(conversationId, {
+        id: userMessage.id,
+        role: 'USER',
+        content: dto.question || 'Please explain this region.',
+        userId,
+        displayName: senderUser?.displayName || 'User',
+        avatarUrl: senderUser?.avatarUrl || undefined,
+        imageUrl: imageUrl || undefined,
+        createdAt: userMessage.createdAt,
+      });
+
+      this.sessionGateway.broadcastMessage(conversationId, {
+        id: assistantMessage.id,
+        role: 'ASSISTANT',
+        content: ragResponse.answer || '',
+        context: ragResponse.context,
+        createdAt: assistantMessage.createdAt,
+      });
+    }
+
     const result = new AskQuestionResultDto();
     result.answer = ragResponse.answer || '';
     result.citations = this.ragService

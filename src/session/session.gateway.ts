@@ -267,6 +267,7 @@ export class SessionGateway
       content: string;
       userId?: string;
       displayName?: string;
+      avatarUrl?: string;
       imageUrl?: string;
       context?: any;
       createdAt: Date;
