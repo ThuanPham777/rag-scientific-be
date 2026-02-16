@@ -138,3 +138,5 @@ All endpoints return consistent error responses with appropriate HTTP status cod
   logger.log(`📚 Swagger docs: http://localhost:${port}/docs`);
 }
 bootstrap();
+
+// Chuc mung nam moi Binh Ngo 2026!
