@@ -270,12 +270,55 @@ export class SessionGateway
       avatarUrl?: string;
       imageUrl?: string;
       context?: any;
+      replyToMessageId?: string;
+      replyTo?: {
+        id: string;
+        content: string;
+        role: string;
+        displayName?: string;
+        isDeleted?: boolean;
+      };
       createdAt: Date;
     },
   ) {
     this.server
       .to(`session:${conversationId}`)
       .emit('session:new-message', message);
+  }
+
+  /**
+   * Broadcast a reaction update to all session participants.
+   */
+  broadcastReactionUpdate(
+    conversationId: string,
+    data: {
+      messageId: string;
+      reactions: Array<{
+        emoji: string;
+        count: number;
+        hasReacted: boolean;
+        reactedBy: Array<{ userId: string; displayName: string }>;
+      }>;
+      action: 'added' | 'removed' | 'updated';
+      userId: string;
+      emoji: string;
+    },
+  ) {
+    this.server
+      .to(`session:${conversationId}`)
+      .emit('session:reaction-update', data);
+  }
+
+  /**
+   * Broadcast a message deletion event to all session participants.
+   */
+  broadcastMessageDeleted(
+    conversationId: string,
+    data: { messageId: string; userId: string },
+  ) {
+    this.server
+      .to(`session:${conversationId}`)
+      .emit('session:message-deleted', data);
   }
 
   /**

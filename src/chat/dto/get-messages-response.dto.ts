@@ -4,6 +4,62 @@ import { ChatCitationDto } from './ask-question-response.dto';
 import { ApiResponseDto, CursorPaginationDto } from 'src/common/dto';
 
 /**
+ * Aggregated reaction for a message
+ */
+export class ReactedByDto {
+  @ApiProperty({ description: 'User ID' })
+  userId: string;
+
+  @ApiProperty({ description: 'User display name' })
+  displayName: string;
+}
+
+export class ReactionAggregateDto {
+  @ApiProperty({ description: 'Emoji', example: '👍' })
+  emoji: string;
+
+  @ApiProperty({ description: 'Total count', example: 3 })
+  count: number;
+
+  @ApiProperty({
+    description: 'Whether the current user has this reaction',
+    example: true,
+  })
+  hasReacted: boolean;
+
+  @ApiProperty({
+    description: 'Users who reacted with this emoji',
+    type: [ReactedByDto],
+  })
+  reactedBy: ReactedByDto[];
+}
+
+/**
+ * Summary of the message being replied to
+ */
+export class ReplyToMessageDto {
+  @ApiProperty({ description: 'Original message ID' })
+  id: string;
+
+  @ApiProperty({ description: 'Original message content (truncated)' })
+  content: string;
+
+  @ApiProperty({
+    description: 'Original message role',
+    enum: ['USER', 'ASSISTANT'],
+  })
+  role: string;
+
+  @ApiPropertyOptional({ description: 'Original sender display name' })
+  displayName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether the original message was deleted',
+  })
+  isDeleted?: boolean;
+}
+
+/**
  * Message item in conversation history
  */
 export class MessageItemDto {
@@ -67,6 +123,23 @@ export class MessageItemDto {
     description: 'Citations for assistant messages',
   })
   citations?: ChatCitationDto[];
+
+  @ApiPropertyOptional({
+    type: [ReactionAggregateDto],
+    description: 'Aggregated reactions on this message',
+  })
+  reactions?: ReactionAggregateDto[];
+
+  @ApiPropertyOptional({
+    type: ReplyToMessageDto,
+    description: 'The message being replied to (if this is a reply)',
+  })
+  replyTo?: ReplyToMessageDto;
+
+  @ApiPropertyOptional({
+    description: 'Whether the message has been soft-deleted',
+  })
+  isDeleted?: boolean;
 }
 
 export class GetMessagesResponseDto extends ApiResponseDto<

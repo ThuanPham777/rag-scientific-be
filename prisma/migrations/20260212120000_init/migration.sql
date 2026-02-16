@@ -1,6 +1,6 @@
 -- ============================================================================
 -- RAG SCIENTIFIC - CONSOLIDATED INITIAL MIGRATION
--- Generated: 2026-02-12
+-- Generated: 2026-02-15
 --
 -- This creates the complete database schema from scratch.
 -- Database: PostgreSQL
@@ -72,7 +72,7 @@ CREATE INDEX "refresh_tokens_token_idx" ON "refresh_tokens"("token");
 CREATE INDEX "refresh_tokens_expires_at_idx" ON "refresh_tokens"("expires_at");
 
 -- ============================================================================
--- TABLE: papers (no folder — folders removed)
+-- TABLE: papers
 -- ============================================================================
 
 CREATE TABLE "papers"
@@ -107,7 +107,6 @@ CREATE INDEX "papers_status_idx" ON "papers"("status");
 
 -- ============================================================================
 -- TABLE: conversations
--- type: SINGLE_PAPER | MULTI_PAPER | GROUP
 -- ============================================================================
 
 CREATE TABLE "conversations"
@@ -147,6 +146,8 @@ CREATE TABLE "messages"
     "model_name" VARCHAR(100),
     "token_count" INTEGER,
     "context" JSONB DEFAULT '{}',
+    "reply_to_message_id" UUID,
+    "deleted_at" TIMESTAMPTZ,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "messages_pkey" PRIMARY KEY ("id")
 );
@@ -154,6 +155,24 @@ CREATE TABLE "messages"
 CREATE INDEX "messages_conversation_id_idx" ON "messages"("conversation_id");
 CREATE INDEX "messages_created_at_idx" ON "messages"("created_at");
 CREATE INDEX "messages_user_id_idx" ON "messages"("user_id");
+CREATE INDEX "messages_reply_to_message_id_idx" ON "messages"("reply_to_message_id");
+
+-- ============================================================================
+-- TABLE: message_reactions
+-- ============================================================================
+
+CREATE TABLE "message_reactions"
+(
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "message_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "emoji" VARCHAR(20) NOT NULL,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "message_reactions_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "message_reactions_message_id_user_id_key" ON "message_reactions"("message_id", "user_id");
+CREATE INDEX "message_reactions_message_id_idx" ON "message_reactions"("message_id");
 
 -- ============================================================================
 -- TABLE: suggested_questions
@@ -304,6 +323,15 @@ CREATE TABLE "related_papers"
 
     ALTER TABLE "messages" ADD CONSTRAINT "messages_user_id_fkey"
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+    ALTER TABLE "messages" ADD CONSTRAINT "messages_reply_to_message_id_fkey"
+    FOREIGN KEY ("reply_to_message_id") REFERENCES "messages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+    ALTER TABLE "message_reactions" ADD CONSTRAINT "message_reactions_message_id_fkey"
+    FOREIGN KEY ("message_id") REFERENCES "messages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+    ALTER TABLE "message_reactions" ADD CONSTRAINT "message_reactions_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
     ALTER TABLE "suggested_questions" ADD CONSTRAINT "suggested_questions_conversation_id_fkey"
     FOREIGN KEY ("conversation_id") REFERENCES "conversations"("id") ON DELETE CASCADE ON UPDATE CASCADE;

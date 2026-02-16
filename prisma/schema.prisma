@@ -105,6 +105,7 @@ model User {
   sessionMembers    SessionMember[]
   sessionInvites    SessionInvite[]
   messages          Message[]
+  messageReactions  MessageReaction[]
 
   @@unique([provider, providerId])
   @@index([email])
@@ -267,16 +268,47 @@ model Message {
   tokenCount      Int?        @map("token_count")
   context         Json?       @default("{}") @db.JsonB
 
+  // === Reply-to-message (thread-style) ===
+  replyToMessageId String?    @map("reply_to_message_id") @db.Uuid
+
+  // === Soft delete ===
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz
+
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   conversation    Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  replyToMessage  Message?         @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies         Message[]        @relation("MessageReplies")
+  reactions       MessageReaction[]
 
   @@index([conversationId])
   @@index([createdAt])
   @@index([userId])
+  @@index([replyToMessageId])
   @@map("messages")
+}
+
+// ============================================================================
+// SECTION 5: MESSAGE REACTIONS
+// ============================================================================
+
+/// Reaction on a message
+model MessageReaction {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId   String   @map("message_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  emoji       String   @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("message_reactions")
 }
 
 // ============================================================================

@@ -361,9 +361,27 @@ export class ChatService {
         context: true,
         createdAt: true,
         userId: true,
+        deletedAt: true,
+        replyToMessageId: true,
         user: conversation.isCollaborative
           ? { select: { displayName: true, avatarUrl: true } }
           : false,
+        replyToMessage: {
+          select: {
+            id: true,
+            content: true,
+            role: true,
+            deletedAt: true,
+            user: { select: { displayName: true } },
+          },
+        },
+        reactions: {
+          select: {
+            emoji: true,
+            userId: true,
+            user: { select: { displayName: true } },
+          },
+        },
       },
     });
 
@@ -428,6 +446,7 @@ export class ChatService {
 
     const mappedMessages: MessageItemDto[] = messages.map((msg) => {
       const userRel = (msg as any).user;
+
       const base: MessageItemDto = {
         id: msg.id,
         role: msg.role,
@@ -440,6 +459,54 @@ export class ChatService {
         displayName: userRel?.displayName ?? undefined,
         avatarUrl: userRel?.avatarUrl ?? undefined,
       };
+
+      // Map reactions
+      if ((msg as any).reactions?.length > 0) {
+        const emojiMap = new Map<
+          string,
+          {
+            count: number;
+            hasReacted: boolean;
+            reactedBy: Array<{ userId: string; displayName: string }>;
+          }
+        >();
+        for (const r of (msg as any).reactions) {
+          const existing = emojiMap.get(r.emoji) || {
+            count: 0,
+            hasReacted: false,
+            reactedBy: [],
+          };
+          existing.count++;
+          existing.reactedBy.push({
+            userId: r.userId,
+            displayName: r.user?.displayName || 'Unknown',
+          });
+          if (r.userId === userId) existing.hasReacted = true;
+          emojiMap.set(r.emoji, existing);
+        }
+        base.reactions = Array.from(emojiMap.entries()).map(
+          ([emoji, data]) => ({
+            emoji,
+            count: data.count,
+            hasReacted: data.hasReacted,
+            reactedBy: data.reactedBy,
+          }),
+        );
+      }
+
+      // Map reply-to (replyToMessage is null if original was hard-deleted via onDelete: SetNull)
+      if ((msg as any).replyToMessage) {
+        const reply = (msg as any).replyToMessage;
+        base.replyTo = {
+          id: reply.id,
+          content: reply.content.substring(0, 200),
+          role: reply.role,
+          displayName:
+            reply.role === 'ASSISTANT'
+              ? 'Assistant'
+              : reply.user?.displayName || undefined,
+        };
+      }
 
       if (msg.role === 'ASSISTANT' && msg.context) {
         const context = msg.context as any;
@@ -847,5 +914,390 @@ export class ChatService {
     await this.prisma.message.deleteMany({
       where: { conversationId },
     });
+  }
+
+  // =========================================================================
+  // MESSAGE REACTIONS
+  // =========================================================================
+
+  /**
+   * Toggle a reaction on a message.
+   * - If user has no reaction → add it
+   * - If user has same emoji → remove it (toggle off)
+   * - If user has different emoji → update to new emoji
+   */
+  async toggleReaction(
+    userId: string,
+    dto: { messageId: string; emoji: string },
+  ): Promise<{
+    action: 'added' | 'removed' | 'updated';
+    messageId: string;
+    emoji: string;
+    userId: string;
+    conversationId: string;
+  }> {
+    const { messageId, emoji } = dto;
+
+    // Verify message exists and get conversation
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, conversationId: true },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    // Verify access to conversation
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: message.conversationId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    if (conversation.isCollaborative) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        message.conversationId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException('You are not a member of this session');
+      }
+    } else if (conversation.userId !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
+
+    // Check existing reaction
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: {
+        messageId_userId: { messageId, userId },
+      },
+    });
+
+    let action: 'added' | 'removed' | 'updated';
+
+    if (!existing) {
+      // No existing reaction → add
+      await this.prisma.messageReaction.create({
+        data: { messageId, userId, emoji },
+      });
+      action = 'added';
+    } else if (existing.emoji === emoji) {
+      // Same emoji → remove (toggle off)
+      await this.prisma.messageReaction.delete({
+        where: { id: existing.id },
+      });
+      action = 'removed';
+    } else {
+      // Different emoji → update
+      await this.prisma.messageReaction.update({
+        where: { id: existing.id },
+        data: { emoji },
+      });
+      action = 'updated';
+    }
+
+    // Get aggregated reactions for broadcast
+    const reactions = await this.getReactionAggregates(messageId, userId);
+
+    // Broadcast via WebSocket
+    this.sessionGateway.broadcastReactionUpdate(message.conversationId, {
+      messageId,
+      reactions,
+      action,
+      userId,
+      emoji,
+    });
+
+    return {
+      action,
+      messageId,
+      emoji,
+      userId,
+      conversationId: message.conversationId,
+    };
+  }
+
+  /**
+   * Get aggregated reactions for a message
+   */
+  async getReactionAggregates(
+    messageId: string,
+    currentUserId: string,
+  ): Promise<
+    Array<{
+      emoji: string;
+      count: number;
+      hasReacted: boolean;
+      reactedBy: Array<{ userId: string; displayName: string }>;
+    }>
+  > {
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: {
+        emoji: true,
+        userId: true,
+        user: { select: { displayName: true } },
+      },
+    });
+
+    // Group by emoji
+    const emojiMap = new Map<
+      string,
+      {
+        count: number;
+        hasReacted: boolean;
+        reactedBy: Array<{ userId: string; displayName: string }>;
+      }
+    >();
+
+    for (const r of reactions) {
+      const existing = emojiMap.get(r.emoji) || {
+        count: 0,
+        hasReacted: false,
+        reactedBy: [],
+      };
+      existing.count++;
+      existing.reactedBy.push({
+        userId: r.userId,
+        displayName: r.user?.displayName || 'Unknown',
+      });
+      if (r.userId === currentUserId) existing.hasReacted = true;
+      emojiMap.set(r.emoji, existing);
+    }
+
+    return Array.from(emojiMap.entries()).map(([emoji, data]) => ({
+      emoji,
+      count: data.count,
+      hasReacted: data.hasReacted,
+      reactedBy: data.reactedBy,
+    }));
+  }
+
+  // =========================================================================
+  // REPLY TO MESSAGE
+  // =========================================================================
+
+  /**
+   * Send a reply to an existing message in a collaborative session.
+   */
+  async replyToMessage(
+    userId: string,
+    dto: { conversationId: string; replyToMessageId: string; content: string },
+  ): Promise<{
+    id: string;
+    content: string;
+    userId: string;
+    displayName: string;
+    avatarUrl?: string;
+    replyToMessageId: string;
+    replyTo: {
+      id: string;
+      content: string;
+      role: string;
+      displayName?: string;
+      isDeleted?: boolean;
+    };
+    createdAt: Date;
+  }> {
+    const { conversationId, replyToMessageId, content } = dto;
+
+    // Verify conversation
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Check access
+    if (conversation.isCollaborative) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException('You are not a member of this session');
+      }
+    } else if (conversation.userId !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
+
+    // Verify the message we're replying to exists
+    const replyTarget = await this.prisma.message.findUnique({
+      where: { id: replyToMessageId, conversationId },
+      select: {
+        id: true,
+        content: true,
+        role: true,
+        deletedAt: true,
+        user: { select: { displayName: true } },
+      },
+    });
+
+    if (!replyTarget) {
+      throw new NotFoundException('Original message not found');
+    }
+
+    // Create reply message
+    const replyMessage = await this.prisma.message.create({
+      data: {
+        conversationId,
+        userId,
+        role: 'USER',
+        content,
+        replyToMessageId,
+      },
+    });
+
+    // Update conversation timestamp
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+    });
+
+    // Get sender info
+    const senderUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true, avatarUrl: true },
+    });
+
+    const displayName = senderUser?.displayName || 'User';
+    const avatarUrl = senderUser?.avatarUrl || undefined;
+
+    const replyTo = {
+      id: replyTarget.id,
+      content: replyTarget.content.substring(0, 200),
+      role: replyTarget.role,
+      displayName:
+        replyTarget.role === 'ASSISTANT'
+          ? 'Assistant'
+          : replyTarget.user?.displayName || undefined,
+    };
+
+    // Broadcast via WebSocket
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: replyMessage.id,
+      role: 'USER',
+      content,
+      userId,
+      displayName,
+      avatarUrl,
+      replyToMessageId,
+      replyTo,
+      createdAt: replyMessage.createdAt,
+    });
+
+    return {
+      id: replyMessage.id,
+      content,
+      userId,
+      displayName,
+      avatarUrl,
+      replyToMessageId,
+      replyTo,
+      createdAt: replyMessage.createdAt,
+    };
+  }
+
+  // =========================================================================
+  // DELETE MESSAGE (HARD DELETE)
+  // =========================================================================
+
+  /**
+   * Hard-delete a message with permission checks.
+   * Also removes associated S3 images.
+   * - USER can delete own messages
+   * - OWNER can delete own + ASSISTANT messages
+   */
+  async deleteMessage(
+    userId: string,
+    dto: { conversationId: string; messageId: string },
+  ): Promise<{
+    messageId: string;
+    conversationId: string;
+  }> {
+    const { conversationId, messageId } = dto;
+
+    // Verify conversation
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Get message (include imageUrl for S3 cleanup)
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId, conversationId },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        imageUrl: true,
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    // Permission check
+    let isOwner = false;
+    if (conversation.isCollaborative) {
+      const { hasAccess, role } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException('You are not a member of this session');
+      }
+      isOwner = role === 'OWNER';
+    } else {
+      if (conversation.userId !== userId) {
+        throw new ForbiddenException('Not authorized');
+      }
+      isOwner = true; // Single-user conversation owner
+    }
+
+    const isOwnMessage = message.userId === userId;
+    const isAssistantMessage = message.role === 'ASSISTANT';
+
+    if (!isOwnMessage && !(isOwner && isAssistantMessage)) {
+      throw new ForbiddenException(
+        'You can only delete your own messages' +
+          (isOwner ? ' or assistant messages' : ''),
+      );
+    }
+
+    // Delete S3 image if present
+    if (message.imageUrl) {
+      try {
+        await this.s3Service.deleteFile(message.imageUrl);
+      } catch (err) {
+        // Log but don't fail the delete operation
+        console.error('Failed to delete S3 image:', err);
+      }
+    }
+
+    // Hard delete the message (cascades to reactions via DB FK)
+    await this.prisma.message.delete({
+      where: { id: messageId },
+    });
+
+    // Broadcast via WebSocket
+    this.sessionGateway.broadcastMessageDeleted(conversationId, {
+      messageId,
+      userId,
+    });
+
+    return {
+      messageId,
+      conversationId,
+    };
   }
 }

@@ -5,6 +5,9 @@
 export * from './ask-question-request.dto';
 export * from './ask-multi-paper-request.dto';
 export * from './explain-region-request.dto';
+export * from './toggle-reaction-request.dto';
+export * from './reply-message-request.dto';
+export * from './delete-message-request.dto';
 
 // Response DTOs
 export * from './ask-question-response.dto';
