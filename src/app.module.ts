@@ -13,6 +13,7 @@ import { GuestModule } from './guest/guest.module';
 import { CleanupModule } from './cleanup/cleanup.module';
 import { HighlightModule } from './highlight/highlight.module';
 import { RagModule } from './rag/rag.module';
+import { NotebookModule } from './notebook/notebook.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RagModule } from './rag/rag.module';
     GuestModule,
     CleanupModule,
     HighlightModule,
+    NotebookModule,
   ],
 })
 export class AppModule {}
