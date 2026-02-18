@@ -46,25 +46,34 @@ export class HighlightService {
       throw new NotFoundException('Paper not found');
     }
 
-    // Owner always has access
-    if (paper.userId === userId) {
-      return { paper };
-    }
-
-    // Check if user is a member of any collaborative session for this paper
+    // Look for a collaborative conversation for this paper.
+    // We need the conversationId for socket broadcasts regardless of
+    // whether the user is the owner or a session member.
     const collaborativeConv = await this.prisma.conversation.findFirst({
       where: {
         paperId,
         isCollaborative: true,
-        sessionMembers: {
-          some: { userId, isActive: true },
-        },
       },
       select: { id: true },
     });
 
+    // Owner always has access
+    if (paper.userId === userId) {
+      return { paper, conversationId: collaborativeConv?.id };
+    }
+
+    // Non-owner: must be an active session member
     if (collaborativeConv) {
-      return { paper, conversationId: collaborativeConv.id };
+      const isMember = await this.prisma.sessionMember.findFirst({
+        where: {
+          conversationId: collaborativeConv.id,
+          userId,
+          isActive: true,
+        },
+      });
+      if (isMember) {
+        return { paper, conversationId: collaborativeConv.id };
+      }
     }
 
     throw new ForbiddenException('You do not have access to this paper');

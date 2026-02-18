@@ -57,7 +57,12 @@ export class SessionGateway
   // Track connected users: socketId -> { userId, conversationId }
   private readonly connectedUsers = new Map<
     string,
-    { userId: string; conversationId: string; displayName: string }
+    {
+      userId: string;
+      conversationId: string;
+      displayName: string;
+      avatarUrl: string | null;
+    }
   >();
 
   constructor(
@@ -78,24 +83,33 @@ export class SessionGateway
         client.handshake.auth?.token ||
         client.handshake.headers?.authorization?.replace('Bearer ', '');
 
+      this.logger.debug(
+        `[handleConnection] Client ${client.id} attempting connection. ` +
+          `Token present: ${!!token}, Auth keys: ${JSON.stringify(Object.keys(client.handshake.auth || {}))}`,
+      );
+
       if (!token) {
-        this.logger.warn(`Client ${client.id} connected without token`);
+        this.logger.warn(
+          `[handleConnection] Client ${client.id} connected WITHOUT token — disconnecting`,
+        );
         client.disconnect();
         return;
       }
 
       const payload = this.jwtService.verify(token, {
-        secret: this.configService.get('JWT_SECRET'),
+        secret: this.configService.get('JWT_ACCESS_SECRET'),
       });
 
       // Attach user info to socket
       (client as any).userId = payload.sub;
       (client as any).email = payload.email;
 
-      this.logger.log(`Client connected: ${client.id} (user: ${payload.sub})`);
+      this.logger.log(
+        `[handleConnection] ✅ Client ${client.id} authenticated — userId: ${payload.sub}, email: ${payload.email}`,
+      );
     } catch (error) {
-      this.logger.warn(
-        `Client ${client.id} failed authentication: ${error.message}`,
+      this.logger.error(
+        `[handleConnection] ❌ Client ${client.id} auth FAILED: ${error.message}`,
       );
       client.disconnect();
     }
@@ -103,19 +117,29 @@ export class SessionGateway
 
   handleDisconnect(client: Socket) {
     const userData = this.connectedUsers.get(client.id);
+    this.logger.log(
+      `[handleDisconnect] Client ${client.id} disconnecting. ` +
+        `userData: ${userData ? JSON.stringify(userData) : 'none'}`,
+    );
+
     if (userData) {
+      const roomName = `session:${userData.conversationId}`;
       // Notify room that user disconnected
-      this.server
-        .to(`session:${userData.conversationId}`)
-        .emit('session:user-left', {
-          userId: userData.userId,
-          displayName: userData.displayName,
-          timestamp: new Date(),
-        });
+      this.server.to(roomName).emit('session:user-left', {
+        userId: userData.userId,
+        displayName: userData.displayName,
+        timestamp: new Date(),
+      });
+
+      this.logger.log(
+        `[handleDisconnect] Emitted 'session:user-left' to room ${roomName} for user ${userData.userId}`,
+      );
 
       this.connectedUsers.delete(client.id);
     }
-    this.logger.log(`Client disconnected: ${client.id}`);
+    this.logger.log(
+      `[handleDisconnect] connectedUsers count: ${this.connectedUsers.size}`,
+    );
   }
 
   // =========================================================================
@@ -128,12 +152,22 @@ export class SessionGateway
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = (client as any).userId;
-    if (!userId) throw new WsException('Not authenticated');
+    this.logger.log(
+      `[session:join] Client ${client.id} — userId: ${userId}, conversationId: ${data?.conversationId}`,
+    );
+
+    if (!userId) {
+      this.logger.warn(`[session:join] Client ${client.id} NOT authenticated`);
+      throw new WsException('Not authenticated');
+    }
 
     // Verify membership
     const { hasAccess } = await this.sessionService.checkAccess(
       userId,
       data.conversationId,
+    );
+    this.logger.log(
+      `[session:join] Access check for user ${userId} on ${data.conversationId}: ${hasAccess}`,
     );
     if (!hasAccess) throw new WsException('Not a member of this session');
 
@@ -153,6 +187,7 @@ export class SessionGateway
       userId,
       conversationId: data.conversationId,
       displayName: user?.displayName || 'Anonymous',
+      avatarUrl: user?.avatarUrl || null,
     });
 
     // Notify others
@@ -166,10 +201,15 @@ export class SessionGateway
     // Return online members to the joining user
     const onlineMembers = this.getOnlineMembers(data.conversationId);
 
-    return {
-      event: 'session:joined',
-      data: { conversationId: data.conversationId, onlineMembers },
-    };
+    // Log room state
+    const roomSockets = this.server.adapter;
+    this.logger.log(
+      `[session:join] ✅ User ${userId} (${user?.displayName}) joined room ${roomName}. ` +
+        `Online members: ${JSON.stringify(onlineMembers)}. ` +
+        `Total connectedUsers: ${this.connectedUsers.size}`,
+    );
+
+    return { conversationId: data.conversationId, onlineMembers };
   }
 
   @SubscribeMessage('session:leave')
@@ -180,6 +220,10 @@ export class SessionGateway
     const roomName = `session:${data.conversationId}`;
     const userData = this.connectedUsers.get(client.id);
 
+    this.logger.log(
+      `[session:leave] Client ${client.id} leaving room ${roomName}. userData: ${userData ? JSON.stringify(userData) : 'none'}`,
+    );
+
     client.leave(roomName);
 
     if (userData) {
@@ -189,12 +233,12 @@ export class SessionGateway
         timestamp: new Date(),
       });
       this.connectedUsers.delete(client.id);
+      this.logger.log(
+        `[session:leave] ✅ Emitted 'session:user-left' for user ${userData.userId}. connectedUsers count: ${this.connectedUsers.size}`,
+      );
     }
 
-    return {
-      event: 'session:left',
-      data: { conversationId: data.conversationId },
-    };
+    return { conversationId: data.conversationId };
   }
 
   // =========================================================================
@@ -207,11 +251,21 @@ export class SessionGateway
     @MessageBody() data: { conversationId: string },
   ) {
     const userData = this.connectedUsers.get(client.id);
-    if (!userData) return;
+    if (!userData) {
+      this.logger.warn(
+        `[session:typing-start] Client ${client.id} not in connectedUsers — ignoring`,
+      );
+      return;
+    }
+
+    this.logger.debug(
+      `[session:typing-start] User ${userData.userId} (${userData.displayName}) in conversation ${data.conversationId}`,
+    );
 
     client.to(`session:${data.conversationId}`).emit('session:typing', {
       userId: userData.userId,
       displayName: userData.displayName,
+      avatarUrl: userData.avatarUrl || null,
       isTyping: true,
     });
   }
@@ -222,11 +276,21 @@ export class SessionGateway
     @MessageBody() data: { conversationId: string },
   ) {
     const userData = this.connectedUsers.get(client.id);
-    if (!userData) return;
+    if (!userData) {
+      this.logger.warn(
+        `[session:typing-stop] Client ${client.id} not in connectedUsers — ignoring`,
+      );
+      return;
+    }
+
+    this.logger.debug(
+      `[session:typing-stop] User ${userData.userId} (${userData.displayName}) in conversation ${data.conversationId}`,
+    );
 
     client.to(`session:${data.conversationId}`).emit('session:typing', {
       userId: userData.userId,
       displayName: userData.displayName,
+      avatarUrl: userData.avatarUrl || null,
       isTyping: false,
     });
   }
@@ -242,7 +306,17 @@ export class SessionGateway
     },
   ) {
     const userData = this.connectedUsers.get(client.id);
-    if (!userData) return;
+    if (!userData) {
+      this.logger.warn(
+        `[session:cursor-move] Client ${client.id} not in connectedUsers — ignoring`,
+      );
+      return;
+    }
+
+    // cursor-move is high-frequency so use verbose/debug only
+    this.logger.verbose?.(
+      `[session:cursor-move] User ${userData.userId} page ${data.pageNumber} scroll ${data.scrollPosition}`,
+    );
 
     client.to(`session:${data.conversationId}`).emit('session:cursor-move', {
       userId: userData.userId,
@@ -281,9 +355,12 @@ export class SessionGateway
       createdAt: Date;
     },
   ) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit('session:new-message', message);
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastMessage] → room ${roomName} | msgId: ${message.id}, role: ${message.role}, ` +
+        `userId: ${message.userId || 'N/A'}, content: "${message.content?.substring(0, 80)}..."`,
+    );
+    this.server.to(roomName).emit('session:new-message', message);
   }
 
   /**
@@ -304,9 +381,11 @@ export class SessionGateway
       emoji: string;
     },
   ) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit('session:reaction-update', data);
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastReactionUpdate] → room ${roomName} | msgId: ${data.messageId}, action: ${data.action}, emoji: ${data.emoji}, userId: ${data.userId}`,
+    );
+    this.server.to(roomName).emit('session:reaction-update', data);
   }
 
   /**
@@ -316,9 +395,11 @@ export class SessionGateway
     conversationId: string,
     data: { messageId: string; userId: string },
   ) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit('session:message-deleted', data);
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastMessageDeleted] → room ${roomName} | msgId: ${data.messageId}, userId: ${data.userId}`,
+    );
+    this.server.to(roomName).emit('session:message-deleted', data);
   }
 
   /**
@@ -329,9 +410,11 @@ export class SessionGateway
     eventType: 'added' | 'updated' | 'deleted',
     highlight: any,
   ) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit(`session:highlight-${eventType}`, highlight);
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastHighlightEvent] → room ${roomName} | type: highlight-${eventType}, highlightId: ${highlight?.id || 'N/A'}`,
+    );
+    this.server.to(roomName).emit(`session:highlight-${eventType}`, highlight);
   }
 
   /**
@@ -342,17 +425,23 @@ export class SessionGateway
     eventType: 'added' | 'updated' | 'deleted',
     comment: any,
   ) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit(`session:comment-${eventType}`, comment);
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastCommentEvent] → room ${roomName} | type: comment-${eventType}, commentId: ${comment?.id || 'N/A'}, highlightId: ${comment?.highlightId || 'N/A'}`,
+    );
+    this.server.to(roomName).emit(`session:comment-${eventType}`, comment);
   }
 
   /**
    * Notify all members that a user was removed.
    */
   broadcastMemberRemoved(conversationId: string, userId: string) {
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastMemberRemoved] → room ${roomName} | removedUserId: ${userId}`,
+    );
     this.server
-      .to(`session:${conversationId}`)
+      .to(roomName)
       .emit('session:member-removed', { userId, timestamp: new Date() });
   }
 
@@ -360,9 +449,9 @@ export class SessionGateway
    * Notify all members that the session ended.
    */
   broadcastSessionEnded(conversationId: string) {
-    this.server
-      .to(`session:${conversationId}`)
-      .emit('session:ended', { timestamp: new Date() });
+    const roomName = `session:${conversationId}`;
+    this.logger.log(`[broadcastSessionEnded] → room ${roomName}`);
+    this.server.to(roomName).emit('session:ended', { timestamp: new Date() });
   }
 
   // =========================================================================

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RagService } from '../rag/index';
-import { SessionRole } from '../../generated/prisma/client';
+import { SessionRole, MessageRole } from '../../generated/prisma/client';
 import {
   CreateSessionDto,
   CreateSessionResultDto,
@@ -684,6 +684,40 @@ export class SessionService {
     if (!hasAccess) {
       throw new ForbiddenException('You are not a member of this session');
     }
+  }
+
+  // =========================================================================
+  // SYSTEM MESSAGES
+  // =========================================================================
+
+  /**
+   * Create a SYSTEM message in the database.
+   * Used for join / leave / end / remove events.
+   */
+  async createSystemMessage(
+    conversationId: string,
+    content: string,
+  ): Promise<{ id: string; content: string; createdAt: Date }> {
+    const msg = await this.prisma.message.create({
+      data: {
+        conversationId,
+        role: MessageRole.SYSTEM,
+        content,
+        userId: null,
+      },
+    });
+    return { id: msg.id, content: msg.content, createdAt: msg.createdAt };
+  }
+
+  /**
+   * Get a user's display name (used to build system message text).
+   */
+  async getUserDisplayName(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true },
+    });
+    return user?.displayName || 'A member';
   }
 
   private generateSessionCode(): string {

@@ -47,35 +47,42 @@ export class CommentService {
       throw new NotFoundException('Highlight not found');
     }
 
-    // Paper owner always has access
+    // Paper owner check
     const paper = await this.prisma.paper.findUnique({
       where: { id: highlight.paperId },
       select: { userId: true },
     });
 
-    if (paper?.userId === userId) {
-      return { highlight };
-    }
+    const isOwner = paper?.userId === userId;
+    const isCreator = highlight.userId === userId;
 
-    // Highlight creator always has access
-    if (highlight.userId === userId) {
-      return { highlight };
-    }
-
-    // Check if user is a member of a collaborative session for this paper
+    // Look for collaborative conversation — needed for socket broadcasts
+    // regardless of whether user is owner/creator.
     const collaborativeConv = await this.prisma.conversation.findFirst({
       where: {
         paperId: highlight.paperId,
         isCollaborative: true,
-        sessionMembers: {
-          some: { userId, isActive: true },
-        },
       },
       select: { id: true },
     });
 
+    // Paper owner or highlight creator always has access
+    if (isOwner || isCreator) {
+      return { highlight, conversationId: collaborativeConv?.id };
+    }
+
+    // Non-owner/non-creator: must be an active session member
     if (collaborativeConv) {
-      return { highlight, conversationId: collaborativeConv.id };
+      const isMember = await this.prisma.sessionMember.findFirst({
+        where: {
+          conversationId: collaborativeConv.id,
+          userId,
+          isActive: true,
+        },
+      });
+      if (isMember) {
+        return { highlight, conversationId: collaborativeConv.id };
+      }
     }
 
     throw new ForbiddenException('You do not have access to this highlight');

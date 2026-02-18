@@ -32,6 +32,13 @@ export class ReactionAggregateDto {
     type: [ReactedByDto],
   })
   reactedBy: ReactedByDto[];
+
+  @ApiProperty({
+    description:
+      'Timestamp when this emoji was first used (for chronological ordering)',
+    example: '2024-01-15T10:30:00.000Z',
+  })
+  firstReactedAt: Date;
 }
 
 /**
@@ -46,7 +53,7 @@ export class ReplyToMessageDto {
 
   @ApiProperty({
     description: 'Original message role',
-    enum: ['USER', 'ASSISTANT'],
+    enum: ['USER', 'ASSISTANT', 'SYSTEM'],
   })
   role: string;
 
@@ -68,7 +75,7 @@ export class MessageItemDto {
 
   @ApiProperty({
     description: 'Role',
-    enum: ['USER', 'ASSISTANT'],
+    enum: ['USER', 'ASSISTANT', 'SYSTEM'],
     example: 'USER',
   })
   role: string;

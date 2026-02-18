@@ -379,6 +379,7 @@ export class ChatService {
           select: {
             emoji: true,
             userId: true,
+            createdAt: true,
             user: { select: { displayName: true } },
           },
         },
@@ -468,6 +469,7 @@ export class ChatService {
             count: number;
             hasReacted: boolean;
             reactedBy: Array<{ userId: string; displayName: string }>;
+            firstReactedAt: Date;
           }
         >();
         for (const r of (msg as any).reactions) {
@@ -475,6 +477,7 @@ export class ChatService {
             count: 0,
             hasReacted: false,
             reactedBy: [],
+            firstReactedAt: r.createdAt,
           };
           existing.count++;
           existing.reactedBy.push({
@@ -482,6 +485,10 @@ export class ChatService {
             displayName: r.user?.displayName || 'Unknown',
           });
           if (r.userId === userId) existing.hasReacted = true;
+          // Track earliest createdAt for chronological ordering
+          if (r.createdAt < existing.firstReactedAt) {
+            existing.firstReactedAt = r.createdAt;
+          }
           emojiMap.set(r.emoji, existing);
         }
         base.reactions = Array.from(emojiMap.entries()).map(
@@ -490,6 +497,7 @@ export class ChatService {
             count: data.count,
             hasReacted: data.hasReacted,
             reactedBy: data.reactedBy,
+            firstReactedAt: data.firstReactedAt,
           }),
         );
       }
@@ -1032,6 +1040,7 @@ export class ChatService {
       count: number;
       hasReacted: boolean;
       reactedBy: Array<{ userId: string; displayName: string }>;
+      firstReactedAt: Date;
     }>
   > {
     const reactions = await this.prisma.messageReaction.findMany({
@@ -1039,6 +1048,7 @@ export class ChatService {
       select: {
         emoji: true,
         userId: true,
+        createdAt: true,
         user: { select: { displayName: true } },
       },
     });
@@ -1050,6 +1060,7 @@ export class ChatService {
         count: number;
         hasReacted: boolean;
         reactedBy: Array<{ userId: string; displayName: string }>;
+        firstReactedAt: Date;
       }
     >();
 
@@ -1058,6 +1069,7 @@ export class ChatService {
         count: 0,
         hasReacted: false,
         reactedBy: [],
+        firstReactedAt: r.createdAt,
       };
       existing.count++;
       existing.reactedBy.push({
@@ -1065,6 +1077,10 @@ export class ChatService {
         displayName: r.user?.displayName || 'Unknown',
       });
       if (r.userId === currentUserId) existing.hasReacted = true;
+      // Track earliest createdAt for chronological ordering
+      if (r.createdAt < existing.firstReactedAt) {
+        existing.firstReactedAt = r.createdAt;
+      }
       emojiMap.set(r.emoji, existing);
     }
 
@@ -1073,6 +1089,7 @@ export class ChatService {
       count: data.count,
       hasReacted: data.hasReacted,
       reactedBy: data.reactedBy,
+      firstReactedAt: data.firstReactedAt,
     }));
   }
 

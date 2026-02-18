@@ -249,6 +249,7 @@ model Conversation {
 enum MessageRole {
   USER
   ASSISTANT
+  SYSTEM
 }
 
 /// Message - individual chat message

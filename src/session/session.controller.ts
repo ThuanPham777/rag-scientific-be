@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { SessionService } from './session.service';
+import { SessionGateway } from './session.gateway';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { JoinSessionDto } from './dto/join-session.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
@@ -38,7 +39,10 @@ import {
 @UseGuards(JwtAuthGuard)
 @Controller('sessions')
 export class SessionController {
-  constructor(private readonly sessionService: SessionService) {}
+  constructor(
+    private readonly sessionService: SessionService,
+    private readonly sessionGateway: SessionGateway,
+  ) {}
 
   // =========================================================================
   // SESSION LIFECYCLE
@@ -76,6 +80,20 @@ export class SessionController {
       user.id,
       dto.inviteToken,
     );
+
+    // Create & broadcast system message
+    const displayName = await this.sessionService.getUserDisplayName(user.id);
+    const sysMsg = await this.sessionService.createSystemMessage(
+      data.conversationId,
+      `${displayName} joined the session`,
+    );
+    this.sessionGateway.broadcastMessage(data.conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+
     return ApiResponseDto.success(
       data,
       'Joined session successfully',
@@ -90,7 +108,23 @@ export class SessionController {
     @CurrentUser() user: any,
     @Param('conversationId') conversationId: string,
   ): Promise<LeaveSessionResponseDto> {
+    // Fetch display name before leaving
+    const displayName = await this.sessionService.getUserDisplayName(user.id);
+
     await this.sessionService.leaveSession(user.id, conversationId);
+
+    // Create & broadcast system message
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      `${displayName} left the session`,
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+
     return ApiResponseDto.success(
       null,
       'Left session successfully',
@@ -110,6 +144,20 @@ export class SessionController {
     @Param('conversationId') conversationId: string,
   ): Promise<LeaveSessionResponseDto> {
     await this.sessionService.endSession(user.id, conversationId);
+
+    // Create & broadcast system message, then notify via dedicated event
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      'The session has ended',
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+    this.sessionGateway.broadcastSessionEnded(conversationId);
+
     return ApiResponseDto.success(
       null,
       'Session ended',
@@ -148,11 +196,29 @@ export class SessionController {
     @Param('conversationId') conversationId: string,
     @Param('userId') targetUserId: string,
   ): Promise<RemoveMemberResponseDto> {
+    // Fetch target's display name before removal
+    const targetDisplayName =
+      await this.sessionService.getUserDisplayName(targetUserId);
+
     const data = await this.sessionService.removeMember(
       user.id,
       conversationId,
       targetUserId,
     );
+
+    // Create & broadcast system message, then notify via dedicated event
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      `${targetDisplayName} was removed from the session`,
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+    this.sessionGateway.broadcastMemberRemoved(conversationId, targetUserId);
+
     return ApiResponseDto.success(
       data,
       'Member removed',
