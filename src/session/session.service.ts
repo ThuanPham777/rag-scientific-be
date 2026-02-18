@@ -40,6 +40,7 @@ export class SessionService {
   /**
    * Start a collaborative (GROUP) session for a paper.
    * Clones the paper (new Paper row with a new ragFileId, same fileUrl),
+   * clones all highlights and comments from the original paper,
    * creates a GROUP conversation referencing the cloned paper,
    * triggers RAG ingestion for the clone, and generates an invite link.
    */
@@ -129,6 +130,46 @@ export class SessionService {
               tokenCount: msg.tokenCount,
               context: msg.context ?? undefined,
               createdAt: msg.createdAt,
+            })),
+          });
+        }
+      }
+
+      // Clone highlights and comments from source paper
+      const sourceHighlights = await tx.highlight.findMany({
+        where: { paperId: dto.paperId },
+        include: {
+          comments: {
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      // Create mapping from old highlight IDs to new highlight IDs
+      for (const sourceHighlight of sourceHighlights) {
+        const newHighlight = await tx.highlight.create({
+          data: {
+            paperId: clonedPaper.id,
+            userId: sourceHighlight.userId,
+            pageNumber: sourceHighlight.pageNumber,
+            selectionRects: sourceHighlight.selectionRects,
+            selectedText: sourceHighlight.selectedText,
+            textPrefix: sourceHighlight.textPrefix,
+            textSuffix: sourceHighlight.textSuffix,
+            color: sourceHighlight.color,
+            createdAt: sourceHighlight.createdAt,
+          },
+        });
+
+        // Clone comments for this highlight
+        if (sourceHighlight.comments.length > 0) {
+          await tx.highlightComment.createMany({
+            data: sourceHighlight.comments.map((comment) => ({
+              highlightId: newHighlight.id,
+              userId: comment.userId,
+              content: comment.content,
+              createdAt: comment.createdAt,
             })),
           });
         }
