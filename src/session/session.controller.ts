@@ -238,11 +238,26 @@ export class SessionController {
     @Param('conversationId') conversationId: string,
     @Body() dto: CreateInviteDto,
   ): Promise<CreateInviteResponseDto> {
+    const displayName = await this.sessionService.getUserDisplayName(user.id);
+
     const data = await this.sessionService.createInvite(
       user.id,
       conversationId,
       dto,
     );
+
+    // Create & broadcast system message
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      `${displayName} created an invite link`,
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+
     return ApiResponseDto.success(
       data,
       'Invite created',
@@ -250,7 +265,7 @@ export class SessionController {
   }
 
   @Delete('invites/:inviteToken')
-  @ApiOperation({ summary: 'Revoke an invite link (owner only)' })
+  @ApiOperation({ summary: 'Revoke an invite link (any member)' })
   @ApiParam({ name: 'inviteToken', description: 'Invite token to revoke' })
   @ApiOkResponse({ type: LeaveSessionResponseDto })
   async revokeInvite(
@@ -261,6 +276,84 @@ export class SessionController {
     return ApiResponseDto.success(
       null,
       'Invite revoked',
+    ) as LeaveSessionResponseDto;
+  }
+
+  @Get(':conversationId/invites/active')
+  @ApiOperation({ summary: 'Get the current active invite for a session' })
+  @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
+  @ApiOkResponse({ type: CreateInviteResponseDto })
+  async getActiveInvite(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ): Promise<CreateInviteResponseDto> {
+    const data = await this.sessionService.getActiveInvite(
+      user.id,
+      conversationId,
+    );
+    return ApiResponseDto.success(
+      data,
+      data ? 'Active invite found' : 'No active invite',
+    ) as CreateInviteResponseDto;
+  }
+
+  @Post(':conversationId/invites/reset')
+  @ApiOperation({ summary: 'Reset invite link — revoke old and create new' })
+  @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
+  @ApiCreatedResponse({ type: CreateInviteResponseDto })
+  async resetInvite(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ): Promise<CreateInviteResponseDto> {
+    const displayName = await this.sessionService.getUserDisplayName(user.id);
+
+    const data = await this.sessionService.resetInvite(user.id, conversationId);
+
+    // Create & broadcast system message
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      `${displayName} reset the invite link`,
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+
+    return ApiResponseDto.success(
+      data,
+      'Invite reset',
+    ) as CreateInviteResponseDto;
+  }
+
+  @Delete(':conversationId/invites')
+  @ApiOperation({ summary: 'Delete all active invites for a session' })
+  @ApiParam({ name: 'conversationId', description: 'Conversation ID' })
+  @ApiOkResponse({ type: LeaveSessionResponseDto })
+  async deleteInvite(
+    @CurrentUser() user: any,
+    @Param('conversationId') conversationId: string,
+  ): Promise<LeaveSessionResponseDto> {
+    const displayName = await this.sessionService.getUserDisplayName(user.id);
+
+    await this.sessionService.deleteInvite(user.id, conversationId);
+
+    // Create & broadcast system message
+    const sysMsg = await this.sessionService.createSystemMessage(
+      conversationId,
+      `${displayName} deleted the invite link`,
+    );
+    this.sessionGateway.broadcastMessage(conversationId, {
+      id: sysMsg.id,
+      role: 'SYSTEM',
+      content: sysMsg.content,
+      createdAt: sysMsg.createdAt,
+    });
+
+    return ApiResponseDto.success(
+      null,
+      'Invite deleted',
     ) as LeaveSessionResponseDto;
   }
 

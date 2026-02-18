@@ -351,6 +351,7 @@ export class SessionService {
 
   /**
    * Leave a collaborative session.
+   * Any member, including OWNER, can leave. Session continues for remaining members.
    */
   async leaveSession(userId: string, conversationId: string): Promise<void> {
     const member = await this.prisma.sessionMember.findUnique({
@@ -361,12 +362,6 @@ export class SessionService {
 
     if (!member) {
       throw new NotFoundException('You are not a member of this session');
-    }
-
-    if (member.role === SessionRole.OWNER) {
-      throw new BadRequestException(
-        'Owner cannot leave. Transfer ownership or end the session instead.',
-      );
     }
 
     await this.prisma.sessionMember.update({
@@ -478,6 +473,7 @@ export class SessionService {
 
   /**
    * Create a new invite link for a session.
+   * Invite links do not expire.
    */
   async createInvite(
     userId: string,
@@ -487,8 +483,8 @@ export class SessionService {
     await this.verifyMembership(userId, conversationId);
 
     const inviteToken = this.generateInviteToken();
-    const expiresInHours = dto.expiresInHours || 48;
-    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+    // Set expiration to 100 years in the future (effectively no expiration)
+    const expiresAt = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000);
 
     await this.prisma.sessionInvite.create({
       data: {
@@ -514,7 +510,7 @@ export class SessionService {
   }
 
   /**
-   * Revoke an invite token (owner only).
+   * Revoke an invite token (any member).
    */
   async revokeInvite(userId: string, inviteToken: string): Promise<void> {
     const invite = await this.prisma.sessionInvite.findUnique({
@@ -525,10 +521,101 @@ export class SessionService {
       throw new NotFoundException('Invite not found');
     }
 
-    await this.verifyOwnership(userId, invite.conversationId);
+    await this.verifyMembership(userId, invite.conversationId);
 
     await this.prisma.sessionInvite.update({
       where: { id: invite.id },
+      data: { isRevoked: true },
+    });
+  }
+
+  /**
+   * Get the current active invite for a conversation.
+   * Returns null if no active invite exists.
+   */
+  async getActiveInvite(
+    userId: string,
+    conversationId: string,
+  ): Promise<CreateInviteResultDto | null> {
+    await this.verifyMembership(userId, conversationId);
+
+    const invite = await this.prisma.sessionInvite.findFirst({
+      where: {
+        conversationId,
+        isRevoked: false,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!invite) {
+      return null;
+    }
+
+    const frontendUrl = this.config.get(
+      'FRONTEND_URL',
+      'http://localhost:5173',
+    );
+
+    return {
+      inviteToken: invite.inviteToken,
+      inviteLink: `${frontendUrl}/session/join/${invite.inviteToken}`,
+      expiresAt: invite.expiresAt,
+      maxUses: invite.maxUses,
+    };
+  }
+
+  /**
+   * Reset invite: revoke all existing invites and create a new one.
+   * Any member can do this. Invite links do not expire.
+   */
+  async resetInvite(
+    userId: string,
+    conversationId: string,
+  ): Promise<CreateInviteResultDto> {
+    await this.verifyMembership(userId, conversationId);
+
+    // Revoke all existing invites for this conversation
+    await this.prisma.sessionInvite.updateMany({
+      where: { conversationId, isRevoked: false },
+      data: { isRevoked: true },
+    });
+
+    // Create a new invite with no expiration
+    const inviteToken = this.generateInviteToken();
+    const expiresAt = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000);
+
+    await this.prisma.sessionInvite.create({
+      data: {
+        conversationId,
+        invitedBy: userId,
+        inviteToken,
+        expiresAt,
+        maxUses: 0, // unlimited
+      },
+    });
+
+    const frontendUrl = this.config.get(
+      'FRONTEND_URL',
+      'http://localhost:5173',
+    );
+
+    return {
+      inviteToken,
+      inviteLink: `${frontendUrl}/session/join/${inviteToken}`,
+      expiresAt,
+      maxUses: 0,
+    };
+  }
+
+  /**
+   * Delete (revoke) all active invites for a conversation.
+   * Any member can do this.
+   */
+  async deleteInvite(userId: string, conversationId: string): Promise<void> {
+    await this.verifyMembership(userId, conversationId);
+
+    await this.prisma.sessionInvite.updateMany({
+      where: { conversationId, isRevoked: false },
       data: { isRevoked: true },
     });
   }

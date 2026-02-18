@@ -118,6 +118,7 @@ export class PaperService {
 
   /**
    * List all papers for a user (owned + shared via collaborative sessions)
+   * Excludes papers with active GROUP conversations where the owner is not an active member
    * @returns Raw array of papers
    */
   async listMyPapers(
@@ -150,16 +151,57 @@ export class PaperService {
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
       orderBy: { createdAt: 'desc' },
+      include: {
+        conversations: {
+          where: {
+            type: 'GROUP',
+            isCollaborative: true,
+          },
+          include: {
+            sessionMembers: {
+              where: { userId },
+              select: { isActive: true },
+            },
+            _count: {
+              select: {
+                sessionMembers: { where: { isActive: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Filter out papers with active GROUP conversations where owner is not an active member
+    const filtered = papers.filter((paper) => {
+      // If paper doesn't belong to this user, always include (they're a session member)
+      if (paper.userId !== userId) return true;
+
+      // Check if paper has an active GROUP conversation
+      const activeGroupConv = paper.conversations.find(
+        (conv) => conv._count.sessionMembers > 0,
+      );
+
+      if (!activeGroupConv) {
+        // No active GROUP conversation, include the paper
+        return true;
+      }
+
+      // Paper has active GROUP conversation - check if owner is an active member
+      const ownerMembership = activeGroupConv.sessionMembers.find(
+        (m) => m.isActive,
+      );
+      return !!ownerMembership;
     });
 
     let nextCursor: string | undefined;
 
-    if (papers.length > limit) {
-      papers.pop(); // remove extra record used for hasMore check
-      nextCursor = papers[papers.length - 1]?.id; // cursor = last item of current page
+    if (filtered.length > limit) {
+      filtered.pop(); // remove extra record used for hasMore check
+      nextCursor = filtered[filtered.length - 1]?.id; // cursor = last item of current page
     }
 
-    const items = papers.map((p) => this.mapToPaperItem(p));
+    const items = filtered.map((p) => this.mapToPaperItem(p));
 
     return {
       items,

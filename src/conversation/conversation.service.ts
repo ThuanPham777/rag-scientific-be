@@ -93,6 +93,34 @@ export class ConversationService {
       throw new ForbiddenException('Paper not found or not owned by user');
     }
 
+    // Check if paper has an active GROUP conversation
+    const existingGroupConv = await this.prisma.conversation.findFirst({
+      where: {
+        paperId: paper.id,
+        type: ConversationType.GROUP,
+        isCollaborative: true,
+      },
+      include: {
+        sessionMembers: {
+          where: { isActive: true },
+          select: { userId: true },
+        },
+      },
+    });
+
+    // If there's an active GROUP conversation and the user is NOT an active member,
+    // prevent creating a new SINGLE_PAPER conversation
+    if (existingGroupConv && existingGroupConv.sessionMembers.length > 0) {
+      const isActiveMember = existingGroupConv.sessionMembers.some(
+        (m) => m.userId === userId,
+      );
+      if (!isActiveMember) {
+        throw new ForbiddenException(
+          'This paper is being used in an active collaborative session',
+        );
+      }
+    }
+
     // Always create as SINGLE_PAPER type (multi-paper conversations are created via chat.service)
     const conv = await this.prisma.conversation.create({
       data: {
@@ -172,12 +200,25 @@ export class ConversationService {
         paper: {
           select: { ragFileId: true, title: true },
         },
+        sessionMembers: {
+          where: { userId },
+          select: { isActive: true },
+        },
       },
+    });
+
+    // Filter out collaborative conversations where owner has left (not an active member)
+    const filtered = convs.filter((c) => {
+      // Non-collaborative conversations: owner always has access
+      if (!c.isCollaborative) return true;
+
+      // Collaborative conversations: must be an active member
+      return c.sessionMembers.length > 0 && c.sessionMembers[0].isActive;
     });
 
     // Deduplicate by ID (in case both filters match the same record)
     const seen = new Set<string>();
-    const unique = convs.filter((c) => {
+    const unique = filtered.filter((c) => {
       if (seen.has(c.id)) return false;
       seen.add(c.id);
       return true;
@@ -211,6 +252,10 @@ export class ConversationService {
           fileName: true,
         },
       },
+      sessionMembers: {
+        where: { userId },
+        select: { isActive: true },
+      },
     };
 
     // Try ownership first
@@ -218,6 +263,16 @@ export class ConversationService {
       where: { id, userId },
       include: includeClause,
     });
+
+    // If found as owner but it's collaborative, check if user is still active member
+    if (conv && conv.isCollaborative) {
+      const isActiveMember =
+        conv.sessionMembers.length > 0 && conv.sessionMembers[0].isActive;
+      if (!isActiveMember) {
+        // Owner has left the session, deny access
+        conv = null;
+      }
+    }
 
     // If not found as owner, check session membership
     if (!conv) {
