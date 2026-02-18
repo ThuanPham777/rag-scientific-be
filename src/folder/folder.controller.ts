@@ -9,6 +9,7 @@ import {
   Param,
   UseGuards,
   Request,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -67,11 +68,11 @@ export class FolderController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a folder with its papers' })
-  @ApiParam({ name: 'id', description: 'Folder ID' })
+  @ApiParam({ name: 'id', description: 'Folder ID (UUID)' })
   @ApiOkResponse({ type: GetFolderResponseDto })
   @ApiResponse({ status: 404, description: 'Folder not found' })
   async findOne(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Request() req: any,
   ): Promise<GetFolderResponseDto> {
     const data = await this.folderService.findOne(id, req.user.id);
@@ -95,12 +96,12 @@ export class FolderController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Update a folder' })
-  @ApiParam({ name: 'id', description: 'Folder ID' })
+  @ApiParam({ name: 'id', description: 'Folder ID (UUID)' })
   @ApiOkResponse({ type: FolderResponseDto })
   @ApiResponse({ status: 404, description: 'Folder not found' })
   @ApiResponse({ status: 409, description: 'Folder name already exists' })
   async update(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: UpdateFolderDto,
     @Request() req: any,
   ): Promise<FolderResponseDto> {
@@ -110,11 +111,11 @@ export class FolderController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a folder' })
-  @ApiParam({ name: 'id', description: 'Folder ID' })
+  @ApiParam({ name: 'id', description: 'Folder ID (UUID)' })
   @ApiOkResponse({ type: DeleteFolderResponseDto })
   @ApiResponse({ status: 404, description: 'Folder not found' })
   async remove(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Request() req: any,
   ): Promise<DeleteFolderResponseDto> {
     const data = await this.folderService.remove(id, req.user.id);
