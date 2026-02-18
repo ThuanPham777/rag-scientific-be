@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
 import { RagService } from '../rag/index';
@@ -267,14 +272,59 @@ export class PaperService {
    * - Deletes from database (cascades to conversations, messages, etc.)
    * - Deletes file from S3
    * - Calls RAG service to cleanup vector store and caches
+   *
+   * Permission rules:
+   * - Paper owner can always delete if no active GROUP conversations exist
+   * - If paper has active GROUP conversation, only GROUP owner can delete
    */
   async deletePaper(userId: string, id: string): Promise<void> {
-    const paper = await this.prisma.paper.findFirst({
-      where: { id, userId },
+    // Find paper without userId filter to provide accurate error messages
+    const paper = await this.prisma.paper.findUnique({
+      where: { id },
+      include: {
+        conversations: {
+          where: {
+            type: 'GROUP',
+            isCollaborative: true,
+          },
+          include: {
+            sessionMembers: {
+              where: { isActive: true },
+            },
+          },
+        },
+      },
     });
 
     if (!paper) {
       throw new NotFoundException('Paper not found');
+    }
+
+    const isPaperOwner = paper.userId === userId;
+
+    // Check if paper has any active GROUP conversations
+    const activeGroupConv = paper.conversations.find(
+      (conv) => conv.sessionMembers.length > 0,
+    );
+
+    if (activeGroupConv) {
+      // Paper is in an active GROUP session - only GROUP owner can delete
+      const isGroupOwner = activeGroupConv.sessionMembers.some(
+        (member) => member.userId === userId && member.role === 'OWNER',
+      );
+
+      if (!isGroupOwner) {
+        throw new ForbiddenException(
+          'This paper is in an active collaborative session. Only the session owner can delete it.',
+        );
+      }
+    } else {
+      // No active GROUP - only paper owner can delete
+      if (!isPaperOwner) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this paper.',
+        );
+      }
     }
 
     // 1. Delete from database (cascades to related tables)
