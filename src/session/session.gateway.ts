@@ -460,8 +460,12 @@ export class SessionGateway
 
   private getOnlineMembers(
     conversationId: string,
-  ): Array<{ userId: string; displayName: string }> {
-    const members: Array<{ userId: string; displayName: string }> = [];
+  ): Array<{ userId: string; displayName: string; avatarUrl: string | null }> {
+    const members: Array<{
+      userId: string;
+      displayName: string;
+      avatarUrl: string | null;
+    }> = [];
     const seen = new Set<string>();
 
     for (const [, userData] of this.connectedUsers) {
@@ -472,6 +476,7 @@ export class SessionGateway
         members.push({
           userId: userData.userId,
           displayName: userData.displayName,
+          avatarUrl: userData.avatarUrl,
         });
         seen.add(userData.userId);
       }
