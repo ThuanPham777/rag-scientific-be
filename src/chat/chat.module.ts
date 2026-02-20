@@ -8,5 +8,6 @@ import { S3Service } from '../upload/s3.service';
   imports: [PrismaModule],
   controllers: [ChatController],
   providers: [ChatService, S3Service],
+  exports: [ChatService],
 })
 export class ChatModule {}

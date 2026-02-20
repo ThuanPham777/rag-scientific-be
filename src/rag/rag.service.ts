@@ -107,6 +107,23 @@ export class RagService {
   }
 
   /**
+   * Generate a freeform response from the RAG back-end (no paper context).
+   * This corresponds to the `/generate` endpoint on the Python service.
+   */
+  async generateText(
+    prompt: string,
+  ): Promise<{ answer: string; modelName?: string; tokenCount?: number }> {
+    this.logger.debug(`Generating freeform text for prompt: ${prompt}`);
+    const response = await this.http.axiosRef.post<{ answer: string }>(
+      `${this.ragUrl}/generate`,
+      { prompt },
+    );
+    return {
+      answer: response.data.answer,
+    };
+  }
+
+  /**
    * Explain a selected region in a PDF using image
    * @param fileId - RAG file ID of the paper
    * @param question - Question about the region
