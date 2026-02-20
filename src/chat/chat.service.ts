@@ -191,6 +191,21 @@ export class ChatService {
       return result;
     }
 
+
+    // If no conversationId provided, treat as a freeform AI request (e.g. notebook "Ask AI" tool)
+    if (!conversationId) {
+      // directly generate a response without persisting any messages
+      const gen = await this.ragService.generateText(question);
+      const result = new AskQuestionResultDto();
+      result.answer = gen.answer || '';
+      result.citations = [];
+      result.assistantMessageId = undefined;
+      result.userMessageId = undefined;
+      result.modelName = gen.modelName;
+      result.tokenCount = gen.tokenCount;
+      return result;
+    }
+
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
     }
@@ -954,6 +969,8 @@ export class ChatService {
     const ragResp = await this.ragService.queryMulti(fileIds, prompt);
     this.logger.debug('searchLibrary ragResp', JSON.stringify(ragResp));
 
+    this.logger.log(`searchLibrary: querying RAG on ${fileIds.length} files with prompt ${prompt}`);
+
     // convert raw citations to our dto format (similar to askMultiPaper mapping)
     let citations = this.ragService
       .extractCitationsFromContext(ragResp.context)
@@ -969,6 +986,7 @@ export class ChatService {
         this.logger.log(
           `searchLibrary: found ${matches.length} inline text matches`,
         );
+        this.logger.log(`searchLibrary: found ${matches.length} inline text matches`);
         citations = matches.map((t: any, i: number) => {
           const c = this.mapCitation(t);
           c.snippet = t.text;
