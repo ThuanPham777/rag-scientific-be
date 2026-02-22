@@ -13,6 +13,7 @@ import {
   SuggestedQuestionsResultDto,
   FollowUpQuestionsResultDto,
 } from './dto/index';
+import { SessionService } from '../session/session.service';
 
 /**
  * Conversation with extra fields for list response
@@ -54,6 +55,7 @@ export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ragService: RagService,
+    private readonly sessionService: SessionService,
   ) {}
 
   private mapToItem(c: any): ConversationItemDto {
@@ -63,6 +65,7 @@ export class ConversationService {
     dto.userId = c.userId;
     dto.title = c.title ?? null;
     dto.type = c.type ?? 'SINGLE_PAPER';
+    dto.isCollaborative = c.isCollaborative ?? false;
     dto.createdAt = c.createdAt;
     dto.updatedAt = c.updatedAt;
     return dto;
@@ -90,6 +93,34 @@ export class ConversationService {
       throw new ForbiddenException('Paper not found or not owned by user');
     }
 
+    // Check if paper has an active GROUP conversation
+    const existingGroupConv = await this.prisma.conversation.findFirst({
+      where: {
+        paperId: paper.id,
+        type: ConversationType.GROUP,
+        isCollaborative: true,
+      },
+      include: {
+        sessionMembers: {
+          where: { isActive: true },
+          select: { userId: true },
+        },
+      },
+    });
+
+    // If there's an active GROUP conversation and the user is NOT an active member,
+    // prevent creating a new SINGLE_PAPER conversation
+    if (existingGroupConv && existingGroupConv.sessionMembers.length > 0) {
+      const isActiveMember = existingGroupConv.sessionMembers.some(
+        (m) => m.userId === userId,
+      );
+      if (!isActiveMember) {
+        throw new ForbiddenException(
+          'This paper is being used in an active collaborative session',
+        );
+      }
+    }
+
     // Always create as SINGLE_PAPER type (multi-paper conversations are created via chat.service)
     const conv = await this.prisma.conversation.create({
       data: {
@@ -112,17 +143,17 @@ export class ConversationService {
     paperId?: string,
     type?: ConversationType,
   ): Promise<ConversationListItem[]> {
-    const whereClause: any = { userId };
+    // Build base ownership filter
+    const ownerFilter: any = { userId };
 
-    // Default to SINGLE_PAPER if no type specified (backward compatibility)
-    // This ensures multi-paper conversations don't appear in single-paper chat lists
+    // Build type filter
     if (type) {
-      whereClause.type = type;
-    } else {
-      // If paperId is specified, only show single-paper conversations for that paper
-      if (paperId) {
-        whereClause.type = ConversationType.SINGLE_PAPER;
-      }
+      ownerFilter.type = type;
+    } else if (paperId) {
+      // If paperId is specified, show single-paper and group conversations
+      ownerFilter.type = {
+        in: [ConversationType.SINGLE_PAPER, ConversationType.GROUP],
+      };
     }
 
     if (paperId) {
@@ -132,25 +163,68 @@ export class ConversationService {
           OR: [
             { id: paperId, userId },
             { ragFileId: paperId, userId },
+            // Also find papers the user has access to via session membership
+            { id: paperId },
+            { ragFileId: paperId },
           ],
         },
       });
       if (paper) {
-        whereClause.paperId = paper.id;
+        ownerFilter.paperId = paper.id;
       }
     }
 
+    // Also find GROUP conversations where user is a session member (not owner)
+    // Only include this filter for GROUP type or when no type filter is specified
+    // Skip for MULTI_PAPER type since those are never collaborative
+    const sessionMemberFilter: any = {
+      isCollaborative: true,
+      type: ConversationType.GROUP,
+      sessionMembers: {
+        some: { userId, isActive: true },
+      },
+    };
+    if (paperId && ownerFilter.paperId) {
+      sessionMemberFilter.paperId = ownerFilter.paperId;
+    }
+
+    // If filtering for MULTI_PAPER specifically, skip the session member filter
+    const shouldIncludeSessionFilter = !type || type === ConversationType.GROUP;
+
     const convs = await this.prisma.conversation.findMany({
-      where: whereClause,
+      where: shouldIncludeSessionFilter
+        ? { OR: [ownerFilter, sessionMemberFilter] }
+        : ownerFilter,
       orderBy: { createdAt: 'desc' },
       include: {
         paper: {
           select: { ragFileId: true, title: true },
         },
+        sessionMembers: {
+          where: { userId },
+          select: { isActive: true },
+        },
       },
     });
 
-    return convs.map((c) => ({
+    // Filter out collaborative conversations where owner has left (not an active member)
+    const filtered = convs.filter((c) => {
+      // Non-collaborative conversations: owner always has access
+      if (!c.isCollaborative) return true;
+
+      // Collaborative conversations: must be an active member
+      return c.sessionMembers.length > 0 && c.sessionMembers[0].isActive;
+    });
+
+    // Deduplicate by ID (in case both filters match the same record)
+    const seen = new Set<string>();
+    const unique = filtered.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+
+    return unique.map((c) => ({
       ...this.mapToItem(c),
       ragFileId: c.paper?.ragFileId,
       paperTitle: c.paper?.title,
@@ -165,23 +239,51 @@ export class ConversationService {
     userId: string,
     id: string,
   ): Promise<ConversationDetail> {
-    const conv = await this.prisma.conversation.findFirst({
-      where: { id, userId },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-        },
-        paper: {
-          select: {
-            id: true,
-            ragFileId: true,
-            title: true,
-            fileUrl: true,
-            fileName: true,
-          },
+    const includeClause = {
+      messages: {
+        orderBy: { createdAt: 'asc' as const },
+      },
+      paper: {
+        select: {
+          id: true,
+          ragFileId: true,
+          title: true,
+          fileUrl: true,
+          fileName: true,
         },
       },
+      sessionMembers: {
+        where: { userId },
+        select: { isActive: true },
+      },
+    };
+
+    // Try ownership first
+    let conv = await this.prisma.conversation.findFirst({
+      where: { id, userId },
+      include: includeClause,
     });
+
+    // If found as owner but it's collaborative, check if user is still active member
+    if (conv && conv.isCollaborative) {
+      const isActiveMember =
+        conv.sessionMembers.length > 0 && conv.sessionMembers[0].isActive;
+      if (!isActiveMember) {
+        // Owner has left the session, deny access
+        conv = null;
+      }
+    }
+
+    // If not found as owner, check session membership
+    if (!conv) {
+      const { hasAccess } = await this.sessionService.checkAccess(userId, id);
+      if (hasAccess) {
+        conv = await this.prisma.conversation.findFirst({
+          where: { id },
+          include: includeClause,
+        });
+      }
+    }
 
     if (!conv) {
       throw new NotFoundException('Conversation not found');
@@ -248,10 +350,24 @@ export class ConversationService {
     conversationId: string,
     textInput?: string,
   ): Promise<SuggestedQuestionsResultDto> {
-    const conv = await this.prisma.conversation.findFirst({
+    // Try ownership first, then session membership
+    let conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
       include: { paper: { select: { ragFileId: true, status: true } } },
     });
+
+    if (!conv) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (hasAccess) {
+        conv = await this.prisma.conversation.findFirst({
+          where: { id: conversationId },
+          include: { paper: { select: { ragFileId: true, status: true } } },
+        });
+      }
+    }
 
     if (!conv) throw new NotFoundException('Conversation not found');
     if (!conv.paper || conv.paper.status !== 'COMPLETED') {
@@ -300,9 +416,22 @@ export class ConversationService {
     userId: string,
     conversationId: string,
   ): Promise<SuggestedQuestionsResultDto> {
-    const conv = await this.prisma.conversation.findFirst({
+    // Try ownership first, then session membership
+    let conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
     });
+
+    if (!conv) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (hasAccess) {
+        conv = await this.prisma.conversation.findFirst({
+          where: { id: conversationId },
+        });
+      }
+    }
 
     if (!conv) throw new NotFoundException('Conversation not found');
 
@@ -333,11 +462,24 @@ export class ConversationService {
     conversationId: string,
     messageId: string,
   ): Promise<FollowUpQuestionsResultDto> {
-    // Verify ownership
-    const conv = await this.prisma.conversation.findFirst({
+    // Try ownership first, then session membership
+    let conv = await this.prisma.conversation.findFirst({
       where: { id: conversationId, userId },
       include: { paper: { select: { ragFileId: true } } },
     });
+
+    if (!conv) {
+      const { hasAccess } = await this.sessionService.checkAccess(
+        userId,
+        conversationId,
+      );
+      if (hasAccess) {
+        conv = await this.prisma.conversation.findFirst({
+          where: { id: conversationId },
+          include: { paper: { select: { ragFileId: true } } },
+        });
+      }
+    }
 
     if (!conv) throw new NotFoundException('Conversation not found');
 

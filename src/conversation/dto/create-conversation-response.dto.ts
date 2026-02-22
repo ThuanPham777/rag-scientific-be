@@ -41,12 +41,19 @@ export class ConversationItemDto {
   @ApiProperty({
     description: `Loại conversation:
 - **SINGLE_PAPER**: Chat về 1 paper duy nhất
-- **MULTI_PAPER**: Chat so sánh/tổng hợp nhiều papers`,
-    enum: ['SINGLE_PAPER', 'MULTI_PAPER'],
+- **MULTI_PAPER**: Chat so sánh/tổng hợp nhiều papers
+- **GROUP**: Collaborative group chat session`,
+    enum: ['SINGLE_PAPER', 'MULTI_PAPER', 'GROUP'],
     example: 'SINGLE_PAPER',
     enumName: 'ConversationType',
   })
   type?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether this conversation is a collaborative session',
+    example: false,
+  })
+  isCollaborative?: boolean;
 
   @ApiProperty({
     description: 'Thời điểm tạo conversation',

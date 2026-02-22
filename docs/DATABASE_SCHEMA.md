@@ -24,54 +24,72 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 └────────┬────────┘
          │
          │ 1:N
-         ▼
-┌─────────────────┐       ┌─────────────────┐
-│ refresh_tokens  │       │     folders     │
-├─────────────────┤       ├─────────────────┤
-│ id (PK)         │       │ id (PK)         │
-│ user_id (FK)    │       │ user_id (FK)    │
-│ token           │       │ name            │
-│ ...             │       │ ...             │
-└─────────────────┘       └────────┬────────┘
-                                   │ 1:N
-                                   ▼
-                          ┌─────────────────┐
-                          │     papers      │
-                          ├─────────────────┤
-                          │ id (PK)         │
-                          │ user_id (FK)    │
-                          │ folder_id (FK)  │◄── nullable
-                          │ rag_file_id     │◄── CRITICAL
-                          │ ...             │
-                          └────────┬────────┘
-                                   │
-          ┌────────────────────────┼────────────────────────┐
-          │ 1:N                    │ 1:N                    │ 1:N
-          ▼                        ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  conversations  │    │suggested_quest..│    │  related_papers │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ id (PK)         │    │ id (PK)         │    │ id (PK)         │
-│ paper_id (FK)   │    │ paper_id (FK)   │    │ paper_id (FK)   │
-│ user_id (FK)    │    │ question        │    │ arxiv_id        │
-│ type            │    │ ...             │    │ score           │
-│ ...             │    └─────────────────┘    │ ...             │
-└────────┬────────┘                           └─────────────────┘
-         │
-         │ 1:N
-         ▼
+         ├───────────────────────────────────────┐
+         │                                       │
+         ▼                                       ▼
+┌─────────────────┐                   ┌─────────────────┐
+│ refresh_tokens  │                   │     papers      │
+├─────────────────┤                   ├─────────────────┤
+│ id (PK)         │                   │ id (PK)         │
+│ user_id (FK)    │                   │ user_id (FK)    │
+│ token           │                   │ rag_file_id     │◄── CRITICAL
+│ ...             │                   │ ...             │
+└─────────────────┘                   └────────┬────────┘
+                                               │
+          ┌────────────────────────────────────┼────────────────────────┐
+          │ 1:N                                │ 1:N                    │ 1:N
+          ▼                                    ▼                        ▼
+┌─────────────────┐              ┌─────────────────┐        ┌─────────────────┐
+│  conversations  │◄─────────────│suggested_quest..│        │  related_papers │
+├─────────────────┤              ├─────────────────┤        ├─────────────────┤
+│ id (PK)         │              │ id (PK)         │        │ id (PK)         │
+│ paper_id (FK)   │              │ conversation_id │        │ paper_id (FK)   │
+│ user_id (FK)    │              │ question        │        │ arxiv_id        │
+│ type            │              │ ...             │        │ score           │
+│ is_collaborative│ ◄── NEW      └─────────────────┘        │ ...             │
+│ session_code    │ ◄── NEW                                 └─────────────────┘
+│ max_members     │ ◄── NEW
+└────┬───┬────────┘
+     │   │
+     │   │ N:M (session members)
+     │   ├────────────────────────┐
+     │   │                        │
+     │   ▼                        ▼
+     │ ┌──────────────────┐  ┌─────────────────┐
+     │ │ session_members  │  │ session_invites │
+     │ ├──────────────────┤  ├─────────────────┤
+     │ │ id (PK)          │  │ id (PK)         │
+     │ │ conversation_id  │  │ conversation_id │
+     │ │ user_id (FK)     │  │ invited_by (FK) │
+     │ │ role (ENUM)      │  │ invite_token    │
+     │ │ is_active        │  │ expires_at      │
+     │ └──────────────────┘  └─────────────────┘
+     │
+     │ 1:N
+     ▼
 ┌─────────────────┐    ┌─────────────────────┐
 │    messages     │    │ conversation_papers │
 ├─────────────────┤    ├─────────────────────┤
 │ id (PK)         │    │ id (PK)             │
 │ conversation_id │    │ conversation_id (FK)│
+│ user_id (FK)    │ ◄── NEW                  │
 │ role            │    │ paper_id (FK)       │
 │ content         │    │ order_index         │
 │ context (JSONB) │    └─────────────────────┘
-│ ...             │           ▲
-└─────────────────┘           │
-                              │ N:M (for MULTI_PAPER)
-                    ──────────┘
+│ reply_to_msg_id │ ◄── NEW
+│ deleted_at      │ ◄── NEW
+│ ...             │
+└────────┬────────┘
+         │ 1:N
+         ▼
+┌─────────────────────┐
+│ message_reactions   │ ◄── NEW TABLE
+├─────────────────────┤
+│ id (PK)             │
+│ message_id (FK)     │
+│ user_id (FK)        │
+│ emoji               │
+└─────────────────────┘
 
 ┌─────────────────┐
 │   highlights    │
@@ -86,8 +104,8 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
          │
          │ 1:N
          ▼
-┌─────────────────┐
-│ highlight_comments │
+┌─────────────────────┐
+│ highlight_comments  │
 ├─────────────────────┤
 │ id (PK)             │
 │ highlight_id (FK)   │
@@ -123,6 +141,7 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 | -------------- | ---------------------------------- |
 | `SINGLE_PAPER` | Chat về 1 paper duy nhất           |
 | `MULTI_PAPER`  | Chat về nhiều papers (cross-paper) |
+| `GROUP`        | Collaborative session (multi-user) |
 
 ### MessageRole
 
@@ -130,6 +149,24 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 | ----------- | ---------------------- |
 | `USER`      | Câu hỏi của người dùng |
 | `ASSISTANT` | Câu trả lời từ AI      |
+| `SYSTEM`    | System messages        |
+
+### SessionRole
+
+| Value    | Mô tả                                  |
+| -------- | -------------------------------------- |
+| `OWNER`  | Người tạo session, có quyền quản lý    |
+| `MEMBER` | Member thường, có thể chat và annotate |
+
+### HighlightColor
+
+| Value    | Mô tả          |
+| -------- | -------------- |
+| `YELLOW` | Màu vàng       |
+| `GREEN`  | Màu xanh lá    |
+| `BLUE`   | Màu xanh dương |
+| `PINK`   | Màu hồng       |
+| `ORANGE` | Màu cam        |
 
 ---
 
@@ -298,17 +335,20 @@ PENDING → PROCESSING → COMPLETED
 
 ### 5. `conversations` - Phiên chat
 
-**Mục đích**: Mỗi conversation là một phiên hội thoại riêng biệt về paper(s).
+**Mục đích**: Mỗi conversation là một phiên hội thoại riêng biệt về paper(s). Hỗ trợ cả chế độ single-user và collaborative session.
 
-| Column       | Type             | Constraints            | Mô tả                         |
-| ------------ | ---------------- | ---------------------- | ----------------------------- |
-| `id`         | UUID             | PK, auto               | ID conversation               |
-| `user_id`    | UUID             | FK → users, NOT NULL   | User tạo                      |
-| `paper_id`   | UUID             | FK → papers, NULL      | Paper chính (có thể null)     |
-| `title`      | VARCHAR(300)     | NULL                   | Tiêu đề (auto từ câu hỏi đầu) |
-| `type`       | ConversationType | DEFAULT 'SINGLE_PAPER' | Loại conversation             |
-| `created_at` | TIMESTAMPTZ      | DEFAULT NOW            | Ngày tạo                      |
-| `updated_at` | TIMESTAMPTZ      | DEFAULT NOW            | Ngày cập nhật                 |
+| Column             | Type             | Constraints            | Mô tả                                           |
+| ------------------ | ---------------- | ---------------------- | ----------------------------------------------- |
+| `id`               | UUID             | PK, auto               | ID conversation                                 |
+| `user_id`          | UUID             | FK → users, NOT NULL   | User tạo (owner)                                |
+| `paper_id`         | UUID             | FK → papers, NULL      | Paper chính (có thể null)                       |
+| `title`            | VARCHAR(300)     | NULL                   | Tiêu đề (auto từ câu hỏi đầu)                   |
+| `type`             | ConversationType | DEFAULT 'SINGLE_PAPER' | Loại conversation                               |
+| `is_collaborative` | BOOLEAN          | DEFAULT false          | **NEW**: Có phải collaborative session không    |
+| `session_code`     | VARCHAR(20)      | NULL, UNIQUE           | **NEW**: Session code (8 ký tự, e.g., A1B2C3D4) |
+| `max_members`      | INTEGER          | DEFAULT 10             | **NEW**: Số lượng member tối đa trong session   |
+| `created_at`       | TIMESTAMPTZ      | DEFAULT NOW            | Ngày tạo                                        |
+| `updated_at`       | TIMESTAMPTZ      | DEFAULT NOW            | Ngày cập nhật                                   |
 
 **Conversation Types**:
 
@@ -322,6 +362,19 @@ PENDING → PROCESSING → COMPLETED
 - `paper_id` chứa paper "chính" (paper đầu tiên được thêm)
 - Các papers khác link qua `conversation_papers`
 - RAG query gửi multiple file_ids
+
+**GROUP**: Collaborative session (real-time multi-user)
+
+- Multiple users chat together về paper
+- Members managed qua `session_members`
+- Real-time sync via WebSockets
+
+**Business Rules**:
+
+- Khi `is_collaborative = true`, conversation trở thành collaborative session
+- `session_code` được generate khi start session (8 ký tự uppercase alphanumeric)
+- Owner có thể invite members và manage session
+- Messages trong collaborative session có `user_id` để identify người gửi
 
 ---
 
@@ -347,17 +400,28 @@ PENDING → PROCESSING → COMPLETED
 
 **Mục đích**: Lưu trữ từng message trong conversation, bao gồm cả context từ RAG để hiển thị citations.
 
-| Column            | Type          | Constraints        | Mô tả                                     |
-| ----------------- | ------------- | ------------------ | ----------------------------------------- |
-| `id`              | UUID          | PK, auto           | ID message                                |
-| `conversation_id` | UUID          | FK → conversations | Conversation chứa                         |
-| `role`            | MessageRole   | NOT NULL           | USER hoặc ASSISTANT                       |
-| `content`         | TEXT          | NOT NULL           | Nội dung message                          |
-| `image_url`       | VARCHAR(1000) | NULL               | URL hình ảnh (nếu user chọn image để hỏi) |
-| `model_name`      | VARCHAR(100)  | NULL               | Model AI đã dùng (GPT-4, etc.)            |
-| `token_count`     | INTEGER       | NULL               | Số tokens tiêu thụ                        |
-| `context`         | JSONB         | DEFAULT '{}'       | **RAG context cho citations**             |
-| `created_at`      | TIMESTAMPTZ   | DEFAULT NOW        | Thời điểm gửi                             |
+| Column                | Type          | Constraints         | Mô tả                                                       |
+| --------------------- | ------------- | ------------------- | ----------------------------------------------------------- |
+| `id`                  | UUID          | PK, auto            | ID message                                                  |
+| `conversation_id`     | UUID          | FK → conversations  | Conversation chứa                                           |
+| `user_id`             | UUID          | FK → users, NULL    | **NEW**: User gửi message (NULL cho ASSISTANT messages)     |
+| `role`                | MessageRole   | NOT NULL            | USER, ASSISTANT hoặc SYSTEM                                 |
+| `content`             | TEXT          | NOT NULL            | Nội dung message                                            |
+| `image_url`           | VARCHAR(1000) | NULL                | URL hình ảnh (nếu user chọn image để hỏi)                   |
+| `model_name`          | VARCHAR(100)  | NULL                | Model AI đã dùng (GPT-4, etc.)                              |
+| `token_count`         | INTEGER       | NULL                | Số tokens tiêu thụ                                          |
+| `context`             | JSONB         | DEFAULT '{}'        | **RAG context cho citations**                               |
+| `reply_to_message_id` | UUID          | FK → messages, NULL | **NEW**: ID của message được reply (threaded conversations) |
+| `deleted_at`          | TIMESTAMPTZ   | NULL                | **NEW**: Soft delete timestamp                              |
+| `created_at`          | TIMESTAMPTZ   | DEFAULT NOW         | Thời điểm gửi                                               |
+
+**MessageRole Enum**:
+
+| Value       | Mô tả                                   |
+| ----------- | --------------------------------------- |
+| `USER`      | Câu hỏi của người dùng                  |
+| `ASSISTANT` | Câu trả lời từ AI                       |
+| `SYSTEM`    | System messages (e.g., "User X joined") |
 
 **Context JSONB Structure**:
 
@@ -387,9 +451,39 @@ PENDING → PROCESSING → COMPLETED
 }
 ```
 
+**New Features**:
+
+- **`user_id`**: Identifies who sent the message in collaborative sessions. NULL for ASSISTANT and backward compatibility.
+- **`reply_to_message_id`**: Enables threaded replies - users can reply to specific messages.
+- **`deleted_at`**: Soft delete support - deleted messages remain in DB but are filtered from queries.
+
 ---
 
-### 8. `suggested_questions` - Câu hỏi gợi ý
+### 8. `message_reactions` - Reactions on Messages
+
+**Mục đích**: Cho phép users react với emoji trên messages (như Slack/Discord).
+
+| Column       | Type        | Constraints   | Mô tả                |
+| ------------ | ----------- | ------------- | -------------------- |
+| `id`         | UUID        | PK, auto      | ID reaction          |
+| `message_id` | UUID        | FK → messages | Message được react   |
+| `user_id`    | UUID        | FK → users    | User thực hiện react |
+| `emoji`      | VARCHAR(20) | NOT NULL      | Emoji character      |
+| `created_at` | TIMESTAMPTZ | DEFAULT NOW   | Thời điểm react      |
+
+**Constraints**:
+
+- `message_reactions_message_id_user_id_key` (UNIQUE): Mỗi user chỉ react 1 emoji per message
+
+**Business Rules**:
+
+- Toggling: Call lại endpoint với cùng emoji để remove reaction
+- Multiple reactions per message from different users allowed
+- Reactions cascade delete when message is deleted
+
+---
+
+### 9. `suggested_questions` - Câu hỏi gợi ý
 
 **Mục đích**: Cache câu hỏi do AI generate (brainstorm feature) cho một conversation.
 
@@ -478,27 +572,103 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
+## 🤝 Collaborative Session Tables
+
+### 12. `session_members` - Session Membership
+
+**Mục đích**: Quản lý members trong collaborative sessions (many-to-many relationship giữa users và conversations).
+
+| Column            | Type        | Constraints        | Mô tả                                  |
+| ----------------- | ----------- | ------------------ | -------------------------------------- |
+| `id`              | UUID        | PK, auto           | ID membership                          |
+| `conversation_id` | UUID        | FK → conversations | Conversation (session)                 |
+| `user_id`         | UUID        | FK → users         | User là member                         |
+| `role`            | SessionRole | DEFAULT 'MEMBER'   | Role trong session (OWNER hoặc MEMBER) |
+| `is_active`       | BOOLEAN     | DEFAULT true       | Member còn active không                |
+| `joined_at`       | TIMESTAMPTZ | DEFAULT NOW        | Thời điểm join                         |
+| `left_at`         | TIMESTAMPTZ | NULL               | Thời điểm leave (NULL nếu chưa leave)  |
+
+**SessionRole Enum**:
+
+| Value    | Mô tả                                                  |
+| -------- | ------------------------------------------------------ |
+| `OWNER`  | Người tạo session, có quyền quản lý members và invites |
+| `MEMBER` | Member thường, có thể chat và annotate                 |
+
+**Constraints**:
+
+- `session_members_conversation_id_user_id_key` (UNIQUE): Mỗi user chỉ join 1 lần per conversation
+
+**Business Rules**:
+
+- Owner không thể leave session (phải end session)
+- Owner có thể remove members
+- Khi leave, `is_active` = false và `left_at` được set
+- Members có thể rejoin via invite (tạo row mới)
+
+---
+
+### 13. `session_invites` - Invite Links
+
+**Mục đích**: Quản lý shareable invite links cho collaborative sessions.
+
+| Column            | Type         | Constraints        | Mô tả                                |
+| ----------------- | ------------ | ------------------ | ------------------------------------ |
+| `id`              | UUID         | PK, auto           | ID invite                            |
+| `conversation_id` | UUID         | FK → conversations | Conversation (session)               |
+| `invited_by`      | UUID         | FK → users         | User tạo invite                      |
+| `invite_token`    | VARCHAR(100) | UNIQUE, NOT NULL   | Token dùng trong link (64 ký tự hex) |
+| `expires_at`      | TIMESTAMPTZ  | NOT NULL           | Thời điểm hết hạn                    |
+| `max_uses`        | INTEGER      | DEFAULT 0          | Số lần dùng tối đa (0 = unlimited)   |
+| `use_count`       | INTEGER      | DEFAULT 0          | Số lần đã dùng                       |
+| `is_revoked`      | BOOLEAN      | DEFAULT false      | Owner có thể revoke invite           |
+| `created_at`      | TIMESTAMPTZ  | DEFAULT NOW        | Ngày tạo                             |
+
+**Constraints**:
+
+- `session_invites_invite_token_key` (UNIQUE): Invite token phải unique globally
+
+**Business Rules**:
+
+- Invite có thể expire theo time hoặc số lần dùng
+- Owner có thể revoke invite bất cứ lúc nào
+- Invite không thể dùng nếu: expired, max_uses reached, hoặc revoked
+- Mỗi successful join increment `use_count`
+
+**Typical Invite Duration**: 48 hours (configurable: 1h - 30 days)
+
+---
+
 ## 🔄 Cascade Rules
 
-| Parent        | Child               | On Delete            |
-| ------------- | ------------------- | -------------------- |
-| users         | refresh_tokens      | CASCADE              |
-| users         | folders             | CASCADE              |
-| users         | papers              | CASCADE              |
-| users         | conversations       | CASCADE              |
-| users         | highlights          | CASCADE              |
-| users         | highlight_comments  | CASCADE              |
-| folders       | papers              | SET NULL ← Đặc biệt! |
-| papers        | conversations       | CASCADE              |
-| papers        | suggested_questions | CASCADE              |
-| papers        | related_papers      | CASCADE              |
-| papers        | highlights          | CASCADE              |
-| conversations | messages            | CASCADE              |
-| conversations | suggested_questions | CASCADE              |
-| conversations | conversation_papers | CASCADE              |
-| highlights    | highlight_comments  | CASCADE              |
+| Parent        | Child               | On Delete |
+| ------------- | ------------------- | --------- |
+| users         | refresh_tokens      | CASCADE   |
+| users         | papers              | CASCADE   |
+| users         | conversations       | CASCADE   |
+| users         | highlights          | CASCADE   |
+| users         | highlight_comments  | CASCADE   |
+| users         | session_members     | CASCADE   |
+| users         | session_invites     | CASCADE   |
+| users         | message_reactions   | CASCADE   |
+| papers        | conversations       | CASCADE   |
+| papers        | suggested_questions | CASCADE   |
+| papers        | related_papers      | CASCADE   |
+| papers        | highlights          | CASCADE   |
+| conversations | messages            | CASCADE   |
+| conversations | suggested_questions | CASCADE   |
+| conversations | conversation_papers | CASCADE   |
+| conversations | session_members     | CASCADE   |
+| conversations | session_invites     | CASCADE   |
+| highlights    | highlight_comments  | CASCADE   |
+| messages      | message_reactions   | CASCADE   |
+| messages      | messages (replies)  | SET NULL  |
 
-**Lưu ý**: Xóa folder chỉ SET NULL `folder_id` của papers, không xóa papers.
+**Lưu ý special cases**:
+
+- **Folders**: Không còn tồn tại trong schema hiện tại - papers là flat structure
+- **Message replies**: Khi parent message bị xóa, `reply_to_message_id` → NULL (không xóa reply)
+- **Session members**: Khi conversation bị xóa, tất cả members và invites bị xóa
 
 ---
 
@@ -507,12 +677,17 @@ PENDING → PROCESSING → COMPLETED
 ### Query Patterns Optimized:
 
 1. **User's papers list**: `papers_user_id_idx`
-2. **Papers in folder**: `papers_folder_id_idx`
-3. **RAG lookup**: `papers_rag_file_id_idx`
+2. **RAG lookup**: `papers_rag_file_id_idx`
+3. **Paper status**: `papers_status_idx`
 4. **Conversation history**: `conversations_user_id_idx`, `messages_conversation_id_idx`
-5. **Token cleanup**: `refresh_tokens_expires_at_idx`
-6. **Highlights by paper**: `highlights_paper_id_idx`, `highlights_paper_id_page_number_idx`
-7. **Comments by highlight**: `highlight_comments_highlight_id_idx`
+5. **Collaborative sessions**: `conversations_is_collaborative_idx`, `conversations_type_idx`
+6. **Token cleanup**: `refresh_tokens_expires_at_idx`
+7. **Highlights by paper**: `highlights_paper_id_idx`, `highlights_paper_id_page_number_idx`
+8. **Comments by highlight**: `highlight_comments_highlight_id_idx`
+9. **Session membership**: `session_members_conversation_id_idx`, `session_members_user_id_idx`
+10. **Invite lookup**: `session_invites_invite_token_idx`, `session_invites_expires_at_idx`
+11. **Message reactions**: `message_reactions_message_id_idx`
+12. **Message replies**: `messages_reply_to_message_id_idx`
 
 ---
 

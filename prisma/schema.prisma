@@ -14,6 +14,7 @@
 // - Single source of truth: `papers` table owns ALL paper metadata
 // - No data duplication between services
 // - RAG tables are minimal (cache only, no metadata duplication)
+// - No folder management — papers are flat, organized by conversations
 //
 // TABLE NAMING: snake_case for all tables and columns
 // ============================================================================
@@ -99,9 +100,12 @@ model User {
   papers            Paper[]
   conversations     Conversation[]
   refreshTokens     RefreshToken[]
-  folders           Folder[]
   highlights        Highlight[]
   highlightComments HighlightComment[]
+  sessionMembers    SessionMember[]
+  sessionInvites    SessionInvite[]
+  messages          Message[]
+  messageReactions  MessageReaction[]
 
   @@unique([provider, providerId])
   @@index([email])
@@ -136,44 +140,19 @@ model RefreshToken {
 }
 
 // ============================================================================
-// SECTION 3: FOLDER MANAGEMENT
-// ============================================================================
-
-/// Folder - organize papers in user's library
-model Folder {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
-
-  name        String   @db.VarChar(100)
-  orderIndex  Int      @default(0) @map("order_index")
-
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  papers      Paper[]
-
-  @@unique([userId, name])
-  @@index([userId])
-  @@index([orderIndex])
-  @@map("folders")
-}
-
-// ============================================================================
-// SECTION 4: PAPERS (SINGLE SOURCE OF TRUTH)
+// SECTION 3: PAPERS (SINGLE SOURCE OF TRUTH)
 //
 // This is THE authoritative table for all paper data.
 // - Backend owns this table
 // - RAG service reads from this table when it needs paper metadata
 // - NO duplication of metadata in RAG tables
+// - When a group chat is started, the paper is CLONED (new Paper row + new ragFileId)
 // ============================================================================
 
 /// Paper/PDF document - SINGLE SOURCE OF TRUTH for all paper data
 model Paper {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String      @map("user_id") @db.Uuid
-  folderId        String?     @map("folder_id") @db.Uuid
 
   // === File Storage (Cloud) - SINGLE SOURCE FOR URL ===
   fileName        String      @map("file_name") @db.VarChar(255)
@@ -207,13 +186,11 @@ model Paper {
 
   // Relations
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  folder             Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
   conversations      Conversation[]
   relatedPapers      RelatedPaper[]
   highlights         Highlight[]
 
   @@index([userId])
-  @@index([folderId])
   @@index([ragFileId])
   @@index([status])
   @@map("papers")
@@ -227,12 +204,13 @@ enum PaperStatus {
 }
 
 // ============================================================================
-// SECTION 5: CONVERSATIONS & MESSAGES
+// SECTION 4: CONVERSATIONS & MESSAGES
 // ============================================================================
 
 enum ConversationType {
   SINGLE_PAPER
   MULTI_PAPER
+  GROUP
 }
 
 /// Conversation - chat session with papers
@@ -244,6 +222,11 @@ model Conversation {
   title         String?          @db.VarChar(300)
   type          ConversationType @default(SINGLE_PAPER)
 
+  // === Collaborative Session ===
+  isCollaborative Boolean        @default(false) @map("is_collaborative")
+  sessionCode    String?         @unique @map("session_code") @db.VarChar(20)
+  maxMembers     Int             @default(10) @map("max_members")
+
   createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -252,23 +235,28 @@ model Conversation {
   paper              Paper?              @relation(fields: [paperId], references: [id], onDelete: Cascade)
   messages           Message[]
   suggestedQuestions SuggestedQuestion[]
+  sessionMembers     SessionMember[]
+  sessionInvites     SessionInvite[]
 
   @@index([userId])
   @@index([paperId])
   @@index([createdAt])
   @@index([type])
+  @@index([isCollaborative])
   @@map("conversations")
 }
 
 enum MessageRole {
   USER
   ASSISTANT
+  SYSTEM
 }
 
 /// Message - individual chat message
 model Message {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId  String      @map("conversation_id") @db.Uuid
+  userId          String?     @map("user_id") @db.Uuid
 
   role            MessageRole
   content         String      @db.Text
@@ -281,14 +269,47 @@ model Message {
   tokenCount      Int?        @map("token_count")
   context         Json?       @default("{}") @db.JsonB
 
+  // === Reply-to-message (thread-style) ===
+  replyToMessageId String?    @map("reply_to_message_id") @db.Uuid
+
+  // === Soft delete ===
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz
+
   createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   conversation    Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  replyToMessage  Message?         @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies         Message[]        @relation("MessageReplies")
+  reactions       MessageReaction[]
 
   @@index([conversationId])
   @@index([createdAt])
+  @@index([userId])
+  @@index([replyToMessageId])
   @@map("messages")
+}
+
+// ============================================================================
+// SECTION 5: MESSAGE REACTIONS
+// ============================================================================
+
+/// Reaction on a message
+model MessageReaction {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId   String   @map("message_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  emoji       String   @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("message_reactions")
 }
 
 // ============================================================================
@@ -354,6 +375,11 @@ enum HighlightColor {
   ORANGE
 }
 
+enum SessionRole {
+  OWNER
+  MEMBER
+}
+
 /// Highlight - text selection annotation on a PDF page
 model Highlight {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -412,4 +438,55 @@ model HighlightComment {
   @@index([userId])
   @@map("highlight_comments")
 }
+
+// ============================================================================
+// SECTION 9: COLLABORATIVE SESSION MANAGEMENT
+// ============================================================================
+
+/// Session member - links users to collaborative conversations
+model SessionMember {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String      @map("conversation_id") @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+
+  role            SessionRole @default(MEMBER)
+  isActive        Boolean     @default(true) @map("is_active")
+
+  joinedAt        DateTime    @default(now()) @map("joined_at") @db.Timestamptz
+  leftAt          DateTime?   @map("left_at") @db.Timestamptz
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+  @@map("session_members")
+}
+
+/// Session invite - shareable invite link for collaborative sessions
+model SessionInvite {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String   @map("conversation_id") @db.Uuid
+  invitedBy       String   @map("invited_by") @db.Uuid
+
+  inviteToken     String   @unique @map("invite_token") @db.VarChar(100)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz
+  maxUses         Int      @default(0) @map("max_uses")  // 0 = unlimited
+  useCount        Int      @default(0) @map("use_count")
+  isRevoked       Boolean  @default(false) @map("is_revoked")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  inviter         User         @relation(fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([inviteToken])
+  @@index([expiresAt])
+  @@map("session_invites")
+}
+
 

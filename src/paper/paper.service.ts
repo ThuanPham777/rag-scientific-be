@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
 import { RagService } from '../rag/index';
+import { SessionService } from '../session/session.service';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { PaperItemDto } from './dto/create-paper-response.dto';
 import { RelatedPapersResultDto } from './dto/related-papers.dto';
@@ -15,6 +21,7 @@ export class PaperService {
     private readonly prisma: PrismaService,
     private readonly ragService: RagService,
     private readonly s3Service: S3Service,
+    private readonly sessionService: SessionService,
   ) {}
 
   private mapToPaperItem(p: any): PaperItemDto {
@@ -58,7 +65,6 @@ export class PaperService {
         fileHash: dto.fileHash,
         ragFileId,
         status: 'PENDING',
-        folderId: dto.folderId || null,
       },
     });
 
@@ -116,7 +122,8 @@ export class PaperService {
   }
 
   /**
-   * List all papers for a user
+   * List all papers for a user (owned + shared via collaborative sessions)
+   * Excludes papers with active GROUP conversations where the owner is not an active member
    * @returns Raw array of papers
    */
   async listMyPapers(
@@ -128,21 +135,78 @@ export class PaperService {
     nextCursor?: string;
   }> {
     const papers = await this.prisma.paper.findMany({
-      where: { userId },
+      where: {
+        OR: [
+          // Papers owned by the user
+          { userId },
+          // Papers shared via collaborative sessions
+          {
+            conversations: {
+              some: {
+                isCollaborative: true,
+                sessionMembers: {
+                  some: { userId, isActive: true },
+                },
+              },
+            },
+          },
+        ],
+      },
       take: limit + 1, // lấy dư 1 record
       skip: cursor ? 1 : 0,
       cursor: cursor ? { id: cursor } : undefined,
       orderBy: { createdAt: 'desc' },
+      include: {
+        conversations: {
+          where: {
+            type: 'GROUP',
+            isCollaborative: true,
+          },
+          include: {
+            sessionMembers: {
+              where: { userId },
+              select: { isActive: true },
+            },
+            _count: {
+              select: {
+                sessionMembers: { where: { isActive: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Filter out papers with active GROUP conversations where owner is not an active member
+    const filtered = papers.filter((paper) => {
+      // If paper doesn't belong to this user, always include (they're a session member)
+      if (paper.userId !== userId) return true;
+
+      // Check if paper has an active GROUP conversation
+      const activeGroupConv = paper.conversations.find(
+        (conv) => conv._count.sessionMembers > 0,
+      );
+
+      if (!activeGroupConv) {
+        // No active GROUP conversation, include the paper
+        return true;
+      }
+
+      // Paper has active GROUP conversation - check if owner is an active member
+      const ownerMembership = activeGroupConv.sessionMembers.find(
+        (m) => m.isActive,
+      );
+      return !!ownerMembership;
     });
 
     let nextCursor: string | undefined;
 
-    if (papers.length > limit) {
-      papers.pop(); // remove extra record used for hasMore check
-      nextCursor = papers[papers.length - 1]?.id; // cursor = last item of current page
+    if (filtered.length > limit) {
+      filtered.pop(); // remove extra record used for hasMore check
+      nextCursor = filtered[filtered.length - 1]?.id; // cursor = last item of current page
     }
 
-    const items = papers.map((p) => this.mapToPaperItem(p));
+    const items = filtered.map((p) => this.mapToPaperItem(p));
 
     return {
       items,
@@ -152,12 +216,30 @@ export class PaperService {
 
   /**
    * Get paper by ID
+   * Access: owner, PaperShare, or session member
    * @returns Raw paper item
    */
   async getPaperById(userId: string, id: string): Promise<PaperItemDto> {
-    const paper = await this.prisma.paper.findFirst({
+    // Try ownership first
+    let paper = await this.prisma.paper.findFirst({
       where: { id, userId },
     });
+
+    // If not found as owner, check session membership on any collaborative conversation for this paper
+    if (!paper) {
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { paperId: id, isCollaborative: true },
+      });
+      if (conversation) {
+        const { hasAccess } = await this.sessionService.checkAccess(
+          userId,
+          conversation.id,
+        );
+        if (hasAccess) {
+          paper = await this.prisma.paper.findFirst({ where: { id } });
+        }
+      }
+    }
 
     if (!paper) {
       throw new NotFoundException('Paper not found');
@@ -190,14 +272,59 @@ export class PaperService {
    * - Deletes from database (cascades to conversations, messages, etc.)
    * - Deletes file from S3
    * - Calls RAG service to cleanup vector store and caches
+   *
+   * Permission rules:
+   * - Paper owner can always delete if no active GROUP conversations exist
+   * - If paper has active GROUP conversation, only GROUP owner can delete
    */
   async deletePaper(userId: string, id: string): Promise<void> {
-    const paper = await this.prisma.paper.findFirst({
-      where: { id, userId },
+    // Find paper without userId filter to provide accurate error messages
+    const paper = await this.prisma.paper.findUnique({
+      where: { id },
+      include: {
+        conversations: {
+          where: {
+            type: 'GROUP',
+            isCollaborative: true,
+          },
+          include: {
+            sessionMembers: {
+              where: { isActive: true },
+            },
+          },
+        },
+      },
     });
 
     if (!paper) {
       throw new NotFoundException('Paper not found');
+    }
+
+    const isPaperOwner = paper.userId === userId;
+
+    // Check if paper has any active GROUP conversations
+    const activeGroupConv = paper.conversations.find(
+      (conv) => conv.sessionMembers.length > 0,
+    );
+
+    if (activeGroupConv) {
+      // Paper is in an active GROUP session - only GROUP owner can delete
+      const isGroupOwner = activeGroupConv.sessionMembers.some(
+        (member) => member.userId === userId && member.role === 'OWNER',
+      );
+
+      if (!isGroupOwner) {
+        throw new ForbiddenException(
+          'This paper is in an active collaborative session. Only the session owner can delete it.',
+        );
+      }
+    } else {
+      // No active GROUP - only paper owner can delete
+      if (!isPaperOwner) {
+        throw new ForbiddenException(
+          'You do not have permission to delete this paper.',
+        );
+      }
     }
 
     // 1. Delete from database (cascades to related tables)

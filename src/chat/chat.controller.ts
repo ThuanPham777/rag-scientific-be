@@ -25,6 +25,10 @@ import {
 } from './dto/ask-multi-paper-request.dto';
 import { GetMessagesResponseDto } from './dto/get-messages-response.dto';
 import { ClearHistoryResponseDto } from './dto/clear-history-response.dto';
+import { SendMessageRequestDto } from './dto/send-message-request.dto';
+import { ToggleReactionRequestDto } from './dto/toggle-reaction-request.dto';
+import { ReplyMessageRequestDto } from './dto/reply-message-request.dto';
+import { DeleteMessageRequestDto } from './dto/delete-message-request.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ExplainRegionRequestDto } from './dto/explain-region-request.dto';
 import {
@@ -57,6 +61,20 @@ export class ChatController {
       data,
       'Answer generated',
     ) as AskQuestionResponseDto;
+  }
+
+  @Post('send-message')
+  @ApiOperation({
+    summary: 'Send a plain chat message (no AI response)',
+    description:
+      'Send a message in a collaborative session without triggering AI. The message is saved and broadcast via WebSocket.',
+  })
+  async sendMessage(
+    @CurrentUser() user: any,
+    @Body() dto: SendMessageRequestDto,
+  ) {
+    const data = await this.chatService.sendMessage(user.id, dto);
+    return ApiResponseDto.success(data, 'Message sent');
   }
 
   @Post('ask-multi')
@@ -136,5 +154,59 @@ export class ChatController {
     return EmptyResponseDto.success(
       'Chat history cleared successfully',
     ) as ClearHistoryResponseDto;
+  }
+
+  // =========================================================================
+  // REACTIONS
+  // =========================================================================
+
+  @Post('reactions/toggle')
+  @ApiOperation({
+    summary: 'Toggle a reaction on a message',
+    description:
+      'Add, update, or remove a reaction. Same emoji = toggle off, different emoji = update.',
+  })
+  async toggleReaction(
+    @CurrentUser() user: any,
+    @Body() dto: ToggleReactionRequestDto,
+  ) {
+    const data = await this.chatService.toggleReaction(user.id, dto);
+    return ApiResponseDto.success(data, 'Reaction toggled');
+  }
+
+  // =========================================================================
+  // REPLY TO MESSAGE
+  // =========================================================================
+
+  @Post('reply')
+  @ApiOperation({
+    summary: 'Reply to a message',
+    description:
+      'Send a reply to an existing message. Works for both user and assistant messages.',
+  })
+  async replyToMessage(
+    @CurrentUser() user: any,
+    @Body() dto: ReplyMessageRequestDto,
+  ) {
+    const data = await this.chatService.replyToMessage(user.id, dto);
+    return ApiResponseDto.success(data, 'Reply sent');
+  }
+
+  // =========================================================================
+  // DELETE MESSAGE
+  // =========================================================================
+
+  @Post('delete-message')
+  @ApiOperation({
+    summary: 'Soft-delete a message',
+    description:
+      'Soft-delete a message. Users can delete own messages. Owners can also delete assistant messages.',
+  })
+  async deleteMessage(
+    @CurrentUser() user: any,
+    @Body() dto: DeleteMessageRequestDto,
+  ) {
+    const data = await this.chatService.deleteMessage(user.id, dto);
+    return ApiResponseDto.success(data, 'Message deleted');
   }
 }

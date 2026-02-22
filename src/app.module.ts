@@ -8,11 +8,11 @@ import { UploadModule } from './upload/upload.module';
 import { PaperModule } from './paper/paper.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { ChatModule } from './chat/chat.module';
-import { FolderModule } from './folder/folder.module';
 import { GuestModule } from './guest/guest.module';
 import { CleanupModule } from './cleanup/cleanup.module';
 import { HighlightModule } from './highlight/highlight.module';
 import { RagModule } from './rag/rag.module';
+import { SessionModule } from './session/session.module';
 
 @Module({
   imports: [
@@ -26,10 +26,10 @@ import { RagModule } from './rag/rag.module';
     PaperModule,
     ConversationModule,
     ChatModule,
-    FolderModule,
     GuestModule,
     CleanupModule,
     HighlightModule,
+    SessionModule,
   ],
 })
 export class AppModule {}
