@@ -322,25 +322,26 @@ Auth: { token: "jwt-token" } in handshake
 ```
 AppModule
 ├── PrismaModule (global)
-├── SessionModule ◄── NEW
+├── SessionModule
 │   ├── SessionService
 │   ├── SessionController
 │   └── SessionGateway (WebSocket)
 ├── ChatModule
-│   ├── ChatService ← imports SessionModule
+│   ├── ChatService
 │   └── ChatController
 ├── ConversationModule
-│   ├── ConversationService ← imports SessionModule
+│   ├── ConversationService
 │   └── ConversationController
 ├── HighlightModule
-│   ├── HighlightService ← imports SessionModule
+│   ├── HighlightService
 │   └── HighlightController
 ├── AuthModule
 ├── PaperModule
 ├── UploadModule
-├── FolderModule
+├── UsersModule
 ├── GuestModule
 ├── CleanupModule
+├── EmailModule
 └── RagModule
 ```
 

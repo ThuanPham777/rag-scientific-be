@@ -31,12 +31,14 @@ NestJS Backend API với các tính năng:
 - 🔑 Google OAuth 2.0
 - 📄 Paper upload & management (AWS S3)
 - 💬 AI Chat (single/multi-paper Q&A)
+- 🤝 Collaborative Sessions (real-time multi-user chat)
 - ✏️ PDF highlighting & comments
-- 📁 Folder organization
+- 💬 Message reactions & threaded replies
 - 📧 Password reset email (Resend)
 - 🎯 Guest mode (24h TTL auto-cleanup)
 - 📖 Swagger API documentation
 - 🗃️ Prisma ORM (type-safe database)
+- 🔌 WebSocket support (real-time updates)
 
 ## 📋 Prerequisites
 
@@ -238,7 +240,8 @@ rag-scientific-be/
 │   ├── schema.prisma           # Database schema definition
 │   └── migrations/             # Database migrations
 ├── docs/
-│   └── DATABASE_SCHEMA.md      # Database documentation
+│   ├── DATABASE_SCHEMA.md      # Database documentation
+│   └── ARCHITECTURE.md         # Architecture & design docs
 ├── src/
 │   ├── auth/                   # 🔐 Authentication module
 │   │   ├── dto/               # Login, Signup, OAuth DTOs
@@ -255,17 +258,18 @@ rag-scientific-be/
 │   ├── chat/                   # 💬 AI Chat module
 │   │   ├── dto/               # Ask question, Multi-paper DTOs
 │   │   ├── chat.controller.ts
-│   │   └── chat.service.ts    # RAG query, message history
+│   │   └── chat.service.ts    # RAG query, message history, reactions
 │   │
 │   ├── conversation/           # 🗣️ Conversation management
 │   │   ├── dto/
 │   │   ├── conversation.controller.ts
 │   │   └── conversation.service.ts
 │   │
-│   ├── folder/                 # 📁 Folder organization
+│   ├── session/                # 🤝 Collaborative sessions
 │   │   ├── dto/
-│   │   ├── folder.controller.ts
-│   │   └── folder.service.ts
+│   │   ├── session.controller.ts
+│   │   ├── session.service.ts
+│   │   └── session.gateway.ts # WebSocket gateway for real-time
 │   │
 │   ├── upload/                 # ☁️ File upload (S3)
 │   │   ├── dto/
@@ -329,24 +333,24 @@ rag-scientific-be/
 | ------ | ----------------------- | ---------------------------- | ---- |
 | `POST` | `/auth/signup`          | Đăng ký tài khoản mới        | ❌   |
 | `POST` | `/auth/login`           | Đăng nhập (email/password)   | ❌   |
-| `POST` | `/auth/google/id-token` | Đăng nhập Google (ID Token)  | ❌   |
+| `POST` | `/auth/google`          | Đăng nhập Google (ID Token)  | ❌   |
 | `POST` | `/auth/google/code`     | Đăng nhập Google (Auth Code) | ❌   |
 | `POST` | `/auth/refresh`         | Refresh access token         | ❌   |
-| `POST` | `/auth/logout`          | Đăng xuất                    | ✅   |
-| `GET`  | `/auth/me`              | Lấy thông tin user hiện tại  | ✅   |
+| `POST` | `/auth/logout`          | Đăng xuất (revoke token)     | ✅   |
+| `POST` | `/auth/logout-all`      | Đăng xuất tất cả thiết bị    | ✅   |
 | `POST` | `/auth/forgot-password` | Gửi email reset mật khẩu     | ❌   |
 | `POST` | `/auth/reset-password`  | Reset mật khẩu với token     | ❌   |
 
 ### Papers (`/papers`)
 
-| Method   | Endpoint                          | Description                | Auth |
-| -------- | --------------------------------- | -------------------------- | ---- |
-| `POST`   | `/papers`                         | Tạo paper mới (sau upload) | ✅   |
-| `GET`    | `/papers`                         | Danh sách papers của user  | ✅   |
-| `GET`    | `/papers/:id`                     | Chi tiết 1 paper           | ✅   |
-| `DELETE` | `/papers/:id`                     | Xóa paper                  | ✅   |
-| `GET`    | `/papers/:id/suggested-questions` | Câu hỏi gợi ý (brainstorm) | ✅   |
-| `GET`    | `/papers/:id/related-papers`      | Papers liên quan (arXiv)   | ✅   |
+| Method   | Endpoint                     | Description                  | Auth |
+| -------- | ---------------------------- | ---------------------------- | ---- |
+| `POST`   | `/papers`                    | Tạo paper mới (sau upload)   | ✅   |
+| `GET`    | `/papers`                    | Danh sách papers của user    | ✅   |
+| `GET`    | `/papers/:id`                | Chi tiết 1 paper             | ✅   |
+| `DELETE` | `/papers/:id`                | Xóa paper                    | ✅   |
+| `POST`   | `/papers/:id/summary`        | Generate paper summary (LLM) | ✅   |
+| `POST`   | `/papers/:id/related-papers` | Tìm papers liên quan (arXiv) | ✅   |
 
 ### Highlights (`/papers/:paperId/highlights`, `/highlights`)
 
@@ -372,38 +376,52 @@ rag-scientific-be/
 | Method   | Endpoint                         | Description                    | Auth |
 | -------- | -------------------------------- | ------------------------------ | ---- |
 | `POST`   | `/chat/ask`                      | Hỏi về 1 paper                 | ✅   |
+| `POST`   | `/chat/send-message`             | Gửi message vào conversation   | ✅   |
 | `POST`   | `/chat/ask-multi`                | Hỏi về nhiều papers            | ✅   |
 | `POST`   | `/chat/explain-region`           | Giải thích vùng chọn trong PDF | ✅   |
 | `GET`    | `/chat/messages/:conversationId` | Lịch sử chat                   | ✅   |
 | `DELETE` | `/chat/history/:conversationId`  | Xóa lịch sử                    | ✅   |
+| `POST`   | `/chat/reactions/toggle`         | Toggle reaction trên message   | ✅   |
+| `POST`   | `/chat/reply`                    | Reply to specific message      | ✅   |
+| `POST`   | `/chat/delete-message`           | Soft delete message            | ✅   |
 
 ### Conversations (`/conversations`)
 
-| Method   | Endpoint             | Description             | Auth |
-| -------- | -------------------- | ----------------------- | ---- |
-| `POST`   | `/conversations`     | Tạo conversation mới    | ✅   |
-| `GET`    | `/conversations`     | Danh sách conversations | ✅   |
-| `GET`    | `/conversations/:id` | Chi tiết conversation   | ✅   |
-| `DELETE` | `/conversations/:id` | Xóa conversation        | ✅   |
+| Method   | Endpoint                                                    | Description                    | Auth |
+| -------- | ----------------------------------------------------------- | ------------------------------ | ---- |
+| `POST`   | `/conversations`                                            | Tạo conversation mới           | ✅   |
+| `GET`    | `/conversations`                                            | Danh sách conversations        | ✅   |
+| `GET`    | `/conversations/:id`                                        | Chi tiết conversation          | ✅   |
+| `DELETE` | `/conversations/:id`                                        | Xóa conversation               | ✅   |
+| `POST`   | `/conversations/:id/suggested-questions`                    | Generate suggested questions   | ✅   |
+| `GET`    | `/conversations/:id/suggested-questions`                    | Lấy cached suggested questions | ✅   |
+| `GET`    | `/conversations/:id/messages/:messageId/followup-questions` | Get followup questions         | ✅   |
 
-### Folders (`/folders`)
+### Sessions (Collaborative) (`/sessions`)
 
-| Method   | Endpoint                        | Description                | Auth |
-| -------- | ------------------------------- | -------------------------- | ---- |
-| `POST`   | `/folders`                      | Tạo folder mới             | ✅   |
-| `GET`    | `/folders`                      | Danh sách folders          | ✅   |
-| `GET`    | `/folders/uncategorized`        | Papers không có folder     | ✅   |
-| `GET`    | `/folders/:id`                  | Chi tiết folder (+ papers) | ✅   |
-| `PATCH`  | `/folders/:id`                  | Cập nhật folder            | ✅   |
-| `DELETE` | `/folders/:id`                  | Xóa folder                 | ✅   |
-| `PATCH`  | `/folders/papers/:paperId/move` | Di chuyển paper            | ✅   |
+| Method   | Endpoint                                    | Description                        | Auth |
+| -------- | ------------------------------------------- | ---------------------------------- | ---- |
+| `POST`   | `/sessions`                                 | Start collaborative session        | ✅   |
+| `POST`   | `/sessions/join`                            | Join session via invite token      | ✅   |
+| `GET`    | `/sessions`                                 | List user's collaborative sessions | ✅   |
+| `GET`    | `/sessions/:conversationId`                 | Get session details & members      | ✅   |
+| `POST`   | `/sessions/:conversationId/leave`           | Leave a session                    | ✅   |
+| `DELETE` | `/sessions/:conversationId`                 | End session (owner only)           | ✅   |
+| `GET`    | `/sessions/:conversationId/members`         | Get session members                | ✅   |
+| `DELETE` | `/sessions/:conversationId/members/:userId` | Remove member (owner only)         | ✅   |
+| `POST`   | `/sessions/:conversationId/invites`         | Create new invite link             | ✅   |
+| `DELETE` | `/sessions/invites/:inviteToken`            | Revoke invite                      | ✅   |
+| `GET`    | `/sessions/:conversationId/invites/active`  | Get active invites                 | ✅   |
+| `POST`   | `/sessions/:conversationId/invites/reset`   | Reset all invites & create new one | ✅   |
+| `DELETE` | `/sessions/:conversationId/invites`         | Revoke all invites                 | ✅   |
 
 ### Upload (`/upload`)
 
-| Method | Endpoint           | Description         | Auth |
-| ------ | ------------------ | ------------------- | ---- |
-| `POST` | `/upload/single`   | Upload 1 PDF lên S3 | ✅   |
-| `POST` | `/upload/multiple` | Upload nhiều PDFs   | ✅   |
+| Method | Endpoint        | Description             | Auth |
+| ------ | --------------- | ----------------------- | ---- |
+| `POST` | `/upload/image` | Upload image to S3      | ✅   |
+| `POST` | `/upload/pdf`   | Upload single PDF to S3 | ✅   |
+| `POST` | `/upload/pdfs`  | Upload multiple PDFs    | ✅   |
 
 ### Guest (`/guest`)
 
