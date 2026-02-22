@@ -14,6 +14,7 @@ import { HighlightModule } from './highlight/highlight.module';
 import { RagModule } from './rag/rag.module';
 import { SessionModule } from './session/session.module';
 import { NotebookModule } from './notebook/notebook.module';
+import { FolderModule } from './folder/folder.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { NotebookModule } from './notebook/notebook.module';
     HighlightModule,
     SessionModule,
     NotebookModule,
+    FolderModule,
   ],
 })
 export class AppModule {}

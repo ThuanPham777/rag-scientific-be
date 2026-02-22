@@ -67,9 +67,12 @@ export class SessionService {
     // 3. Transaction: clone paper + create GROUP conversation + owner membership + invite
     const result = await this.prisma.$transaction(async (tx) => {
       // Clone the paper (same fileUrl, new ragFileId)
+      // IMPORTANT: folderId must be null — group papers are tied to
+      // conversations, NOT folders. Folders are a private UI layer.
       const clonedPaper = await tx.paper.create({
         data: {
           userId,
+          folderId: null, // Group paper must NOT belong to any folder
           fileName: paper.fileName,
           fileUrl: paper.fileUrl,
           fileSize: paper.fileSize,
