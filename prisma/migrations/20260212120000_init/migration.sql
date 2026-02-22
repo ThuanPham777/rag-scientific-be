@@ -353,6 +353,25 @@ CREATE TABLE "related_papers"
     CREATE INDEX "session_invites_expires_at_idx" ON "session_invites"("expires_at");
 
     -- ============================================================================
+    -- TABLE: notebooks
+    -- ============================================================================
+
+    CREATE TABLE "notebooks"
+    (
+        "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+        "user_id" UUID NOT NULL,
+        "title" VARCHAR(500) NOT NULL DEFAULT 'Untitled',
+        "content" TEXT NOT NULL DEFAULT '',
+        "order_index" INTEGER NOT NULL DEFAULT 0,
+        "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updated_at" TIMESTAMPTZ NOT NULL,
+        CONSTRAINT "notebooks_pkey" PRIMARY KEY ("id")
+    );
+
+    CREATE INDEX "notebooks_user_id_idx" ON "notebooks"("user_id");
+    CREATE INDEX "notebooks_updated_at_idx" ON "notebooks"("updated_at");
+
+    -- ============================================================================
     -- FOREIGN KEY CONSTRAINTS
     -- ============================================================================
 
@@ -420,3 +439,6 @@ CREATE TABLE "related_papers"
 
     ALTER TABLE "session_invites" ADD CONSTRAINT "session_invites_invited_by_fkey"
     FOREIGN KEY ("invited_by") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+    ALTER TABLE "notebooks" ADD CONSTRAINT "notebooks_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
