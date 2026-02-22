@@ -23,6 +23,7 @@ import {
   AskMultiPaperRequestDto,
   AskMultiPaperResponseDto,
 } from './dto/ask-multi-paper-request.dto';
+import { GenerateRequestDto, GenerateResponseDto } from './dto/generate.dto';
 import { GetMessagesResponseDto } from './dto/get-messages-response.dto';
 import { ClearHistoryResponseDto } from './dto/clear-history-response.dto';
 import { SendMessageRequestDto } from './dto/send-message-request.dto';
@@ -75,6 +76,29 @@ export class ChatController {
   ) {
     const data = await this.chatService.sendMessage(user.id, dto);
     return ApiResponseDto.success(data, 'Message sent');
+  }
+
+  @Post('generate')
+  @ApiOperation({
+    summary: 'Generate freeform text with AI',
+    description:
+      'Create a text blob based on user prompt; typically used by notebook Ask-AI tool. ' +
+      'Response will be in same language as the user input.',
+  })
+  @ApiOkResponse({ type: GenerateResponseDto })
+  async generate(
+    @Body() dto: GenerateRequestDto,
+  ): Promise<ApiResponseDto<GenerateResponseDto>> {
+    // no user authentication required as this isn't tied to a conversation
+    const answer = await this.chatService.askQuestion('', {
+      conversationId: '',
+      question: dto.prompt,
+    } as any as AskQuestionRequestDto);
+    // note: askQuestion handles empty conversationId by generating free text
+    return ApiResponseDto.success(
+      { answer: answer.answer },
+      'Text generated',
+    ) as ApiResponseDto<GenerateResponseDto>;
   }
 
   @Post('ask-multi')

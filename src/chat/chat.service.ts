@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../upload/s3.service';
@@ -21,6 +22,8 @@ import { SessionGateway } from '../session/session.gateway';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ragService: RagService,
@@ -173,6 +176,20 @@ export class ChatService {
       where: { id: conversationId },
       include: { paper: true },
     });
+
+    // If no conversationId provided, treat as a freeform AI request (e.g. notebook "Ask AI" tool)
+    if (!conversationId) {
+      // directly generate a response without persisting any messages
+      const gen = await this.ragService.generateText(question);
+      const result = new AskQuestionResultDto();
+      result.answer = gen.answer || '';
+      result.citations = [];
+      result.assistantMessageId = undefined;
+      result.userMessageId = undefined;
+      result.modelName = gen.modelName;
+      result.tokenCount = gen.tokenCount;
+      return result;
+    }
 
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
@@ -905,6 +922,71 @@ export class ChatService {
   /**
    * Clear chat history for a conversation
    */
+  async searchLibrary(
+    userId: string,
+    query: string,
+  ): Promise<AskMultiPaperResultDto> {
+    // perform semantic search across all user papers that have been processed
+    const papers = await this.prisma.paper.findMany({
+      where: { userId, status: 'COMPLETED' },
+      select: { ragFileId: true },
+    });
+    const fileIds = papers.map((p) => p.ragFileId).filter(Boolean) as string[];
+    const result = new AskMultiPaperResultDto();
+    if (fileIds.length === 0) {
+      result.answer = '';
+      result.citations = [];
+      result.sources = [];
+      result.conversationId = '';
+      result.assistantMessageId = '';
+      result.userMessageId = '';
+      return result;
+    }
+    // call ragService.queryMulti directly without persisting messages
+    // use a prompt that asks for passages containing the exact phrase
+    const prompt =
+      query && query.trim()
+        ? `Return any extracted text passages from the documents that contain the exact phrase "${query.replace(/"/g, '\\"')}". Include at most 5 short snippets.`
+        : 'Return any extracted text passages from the documents.';
+    this.logger.log(
+      `searchLibrary: querying RAG on ${fileIds.length} files with prompt ${prompt}`,
+    );
+    const ragResp = await this.ragService.queryMulti(fileIds, prompt);
+    this.logger.debug('searchLibrary ragResp', JSON.stringify(ragResp));
+
+    // convert raw citations to our dto format (similar to askMultiPaper mapping)
+    let citations = this.ragService
+      .extractCitationsFromContext(ragResp.context)
+      .map((c: any) => this.mapCitation(c));
+
+    // fallback: look through context texts directly for substring matches
+    if (citations.length === 0 && ragResp.context?.texts) {
+      const q = query.toLowerCase();
+      const matches = (ragResp.context.texts as any[]).filter((t) =>
+        (t.text || '').toLowerCase().includes(q),
+      );
+      if (matches.length) {
+        this.logger.log(
+          `searchLibrary: found ${matches.length} inline text matches`,
+        );
+        citations = matches.map((t: any, i: number) => {
+          const c = this.mapCitation(t);
+          c.snippet = t.text;
+          return c;
+        });
+      }
+    }
+
+    result.answer = ragResp.answer || '';
+    result.citations = citations;
+    // sources not provided by this endpoint so leave empty
+    result.sources = [];
+    result.conversationId = '';
+    result.assistantMessageId = '';
+    result.userMessageId = '';
+    return result;
+  }
+
   async clearChatHistory(
     userId: string,
     conversationId: string,

@@ -9,5 +9,6 @@ import { SessionModule } from '../session/session.module';
   imports: [PrismaModule, SessionModule],
   controllers: [ChatController],
   providers: [ChatService, S3Service],
+  exports: [ChatService],
 })
 export class ChatModule {}

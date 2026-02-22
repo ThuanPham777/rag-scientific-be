@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperService } from './paper.service';
+import { ChatService } from '../chat/chat.service';
 import { CreatePaperRequestDto } from './dto/create-paper-request.dto';
 import { CreatePaperResponseDto } from './dto/create-paper-response.dto';
 import { ListPapersResponseDto } from './dto/list-papers-response.dto';
@@ -43,7 +44,10 @@ import { ListPaperRequestsDto } from './dto/list-papers-request.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('papers')
 export class PaperController {
-  constructor(private readonly paperService: PaperService) {}
+  constructor(
+    private readonly paperService: PaperService,
+    private readonly chatService: ChatService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -113,6 +117,21 @@ export class PaperController {
       pagination,
       'List of papers',
     ) as ListPapersResponseDto;
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Search across all user papers',
+    description: 'Performs semantic search over the contents of every paper the user has processed and returns matching snippets as citations.',
+  })
+  @ApiQuery({ name: 'term', required: true, description: 'Search term' })
+  async search(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('term') term: string,
+  ) {
+    // delegate to chat service for multi-paper search
+    const data = await this.chatService.searchLibrary(user.id, term);
+    return ApiResponseDto.success(data, 'Search results') as any;
   }
 
   @Get(':id')
