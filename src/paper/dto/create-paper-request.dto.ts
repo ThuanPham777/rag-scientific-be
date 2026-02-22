@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsUUID } from 'class-validator';
 
 export class CreatePaperRequestDto {
   @ApiProperty({ description: 'Original filename' })
@@ -19,4 +19,13 @@ export class CreatePaperRequestDto {
   @IsOptional()
   @IsString()
   fileHash?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Folder ID to organize paper into (private UI layer, user-owned folders only)',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  folderId?: string;
 }

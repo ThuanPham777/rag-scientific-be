@@ -46,19 +46,31 @@ export class PaperService {
   }
 
   /**
-   * Create a new paper and trigger RAG ingestion
+   * Create a new paper and trigger RAG ingestion.
+   * Optionally assigns to a folder (private UI organization).
    * @returns Raw paper item
    */
   async createPaper(
     userId: string,
     dto: CreatePaperRequestDto,
   ): Promise<PaperItemDto> {
+    // Validate folder ownership if folderId provided
+    if (dto.folderId) {
+      const folder = await this.prisma.folder.findUnique({
+        where: { id: dto.folderId },
+      });
+      if (!folder || folder.userId !== userId) {
+        throw new ForbiddenException('Folder not found or not owned by user');
+      }
+    }
+
     // Generate ragFileId (UUID for RAG service)
     const ragFileId = crypto.randomUUID();
 
     const paper = await this.prisma.paper.create({
       data: {
         userId,
+        folderId: dto.folderId || null,
         fileName: dto.fileName,
         fileUrl: dto.fileUrl,
         fileSize: dto.fileSize ? BigInt(dto.fileSize) : null,
@@ -164,13 +176,8 @@ export class PaperService {
           },
           include: {
             sessionMembers: {
-              where: { userId },
-              select: { isActive: true },
-            },
-            _count: {
-              select: {
-                sessionMembers: { where: { isActive: true } },
-              },
+              where: { isActive: true },
+              select: { userId: true, isActive: true },
             },
           },
         },
@@ -182,9 +189,9 @@ export class PaperService {
       // If paper doesn't belong to this user, always include (they're a session member)
       if (paper.userId !== userId) return true;
 
-      // Check if paper has an active GROUP conversation
+      // Check if paper has an active GROUP conversation (with at least one active member)
       const activeGroupConv = paper.conversations.find(
-        (conv) => conv._count.sessionMembers > 0,
+        (conv) => conv.sessionMembers.length > 0,
       );
 
       if (!activeGroupConv) {
@@ -194,7 +201,7 @@ export class PaperService {
 
       // Paper has active GROUP conversation - check if owner is an active member
       const ownerMembership = activeGroupConv.sessionMembers.find(
-        (m) => m.isActive,
+        (m) => m.userId === userId,
       );
       return !!ownerMembership;
     });

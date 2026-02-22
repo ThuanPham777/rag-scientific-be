@@ -24,6 +24,37 @@ CREATE TYPE "SessionRole" AS ENUM
 ('OWNER', 'MEMBER');
 
 -- ============================================================================
+-- RAG SERVICE TABLES
+-- ============================================================================
+
+-- rag_paper_cache: RAG processing cache
+CREATE TABLE "rag_paper_cache"
+(
+    "rag_paper_id" VARCHAR(100) NOT NULL,
+    "file_content_hash" VARCHAR(64),
+    "last_processed_at" TIMESTAMPTZ,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "rag_paper_cache_pkey" PRIMARY KEY ("rag_paper_id")
+);
+
+-- paper_content_summaries: Cache LLM-generated summaries for tables and images
+CREATE TABLE "paper_content_summaries"
+(
+    "id" SERIAL NOT NULL,
+    "rag_paper_id" VARCHAR(100) NOT NULL,
+    "content_type" VARCHAR(20) NOT NULL,
+    "content_index" INTEGER NOT NULL,
+    "content_hash" VARCHAR(64) NOT NULL,
+    "summary_text" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "paper_content_summaries_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "paper_content_summaries_rag_paper_id_content_type_content_idx" ON "paper_content_summaries"("rag_paper_id", "content_type", "content_index");
+CREATE INDEX "paper_content_summaries_rag_paper_id_idx" ON "paper_content_summaries"("rag_paper_id");
+CREATE INDEX "paper_content_summaries_rag_paper_id_content_type_idx" ON "paper_content_summaries"("rag_paper_id", "content_type");
+
+-- ============================================================================
 -- TABLE: users
 -- ============================================================================
 
@@ -71,6 +102,23 @@ CREATE INDEX "refresh_tokens_user_id_idx" ON "refresh_tokens"("user_id");
 CREATE INDEX "refresh_tokens_token_idx" ON "refresh_tokens"("token");
 CREATE INDEX "refresh_tokens_expires_at_idx" ON "refresh_tokens"("expires_at");
 
+CREATE TABLE "folders"
+(
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" UUID NOT NULL,
+    "name" VARCHAR(100) NOT NULL,
+    "order_index" INTEGER NOT NULL DEFAULT 0,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT "folders_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "folders_user_id_name_key" ON "folders"("user_id", "name");
+CREATE INDEX "folders_user_id_idx" ON "folders"("user_id");
+CREATE INDEX "folders_order_index_idx" ON "folders"("order_index");
+
+
 -- ============================================================================
 -- TABLE: papers
 -- ============================================================================
@@ -79,6 +127,7 @@ CREATE TABLE "papers"
 (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" UUID NOT NULL,
+    "folder_id" UUID,
     "file_name" VARCHAR(255) NOT NULL,
     "file_url" VARCHAR(1000) NOT NULL,
     "file_size" BIGINT,
@@ -102,6 +151,7 @@ CREATE TABLE "papers"
 
 CREATE UNIQUE INDEX "papers_rag_file_id_key" ON "papers"("rag_file_id");
 CREATE INDEX "papers_user_id_idx" ON "papers"("user_id");
+CREATE INDEX "papers_folder_id_idx" ON "papers"("folder_id");
 CREATE INDEX "papers_rag_file_id_idx" ON "papers"("rag_file_id");
 CREATE INDEX "papers_status_idx" ON "papers"("status");
 
@@ -309,8 +359,16 @@ CREATE TABLE "related_papers"
     ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_fkey"
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+    -- folders → users
+    ALTER TABLE "folders" ADD CONSTRAINT "folders_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
     ALTER TABLE "papers" ADD CONSTRAINT "papers_user_id_fkey"
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+    -- papers → folders
+    ALTER TABLE "papers" ADD CONSTRAINT "papers_folder_id_fkey"
+    FOREIGN KEY ("folder_id") REFERENCES "folders"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
     ALTER TABLE "conversations" ADD CONSTRAINT "conversations_user_id_fkey"
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
