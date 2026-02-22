@@ -39,25 +39,36 @@ datasource db {
 // Owner: RAG_BE_02
 // Note: Does NOT store metadata - that's in `papers` table
 //
-// Columns:
-// - rag_paper_id VARCHAR(100) PRIMARY KEY  -- Links to papers.rag_file_id
-// - file_content_hash VARCHAR(64)          -- Hash for rebuild detection
-// - last_processed_at TIMESTAMPTZ          -- When last processed
-// - created_at TIMESTAMPTZ
-//
 // Table: paper_content_summaries
 // Purpose: Cache LLM-generated summaries for tables and images
 // Owner: RAG_BE_02
-//
-// Columns:
-// - id SERIAL PRIMARY KEY
-// - rag_paper_id VARCHAR(100)              -- Links to rag_paper_cache
-// - content_type VARCHAR(20)               -- 'table' or 'image'
-// - content_index INTEGER                  -- Position in extraction order
-// - content_hash VARCHAR(64)               -- Hash for cache invalidation
-// - summary_text TEXT                      -- The LLM-generated summary
-// - created_at TIMESTAMPTZ
 // ============================================================================
+
+/// RAG processing cache - managed by RAG service (RAG_BE_02)
+model RagPaperCache {
+  ragPaperId       String    @id @map("rag_paper_id") @db.VarChar(100)
+  fileContentHash  String?   @map("file_content_hash") @db.VarChar(64)
+  lastProcessedAt  DateTime? @map("last_processed_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("rag_paper_cache")
+}
+
+/// Paper content summaries - managed by RAG service (RAG_BE_02)
+model PaperContentSummary {
+  id            Int      @id @default(autoincrement())
+  ragPaperId    String   @map("rag_paper_id") @db.VarChar(100)
+  contentType   String   @map("content_type") @db.VarChar(20)
+  contentIndex  Int      @map("content_index")
+  contentHash   String   @map("content_hash") @db.VarChar(64)
+  summaryText   String   @map("summary_text") @db.Text
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([ragPaperId, contentType, contentIndex])
+  @@index([ragPaperId])
+  @@index([ragPaperId, contentType])
+  @@map("paper_content_summaries")
+}
 
 // ============================================================================
 // SECTION 1: USER MANAGEMENT
@@ -98,6 +109,7 @@ model User {
 
   // Relations
   papers            Paper[]
+  folders           Folder[]
   conversations     Conversation[]
   refreshTokens     RefreshToken[]
   highlights        Highlight[]
@@ -140,6 +152,32 @@ model RefreshToken {
 }
 
 // ============================================================================
+// SECTION 3: FOLDER MANAGEMENT
+// ============================================================================
+
+/// Folder - organize papers in user's library
+model Folder {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+
+  name        String   @db.VarChar(100)
+  orderIndex  Int      @default(0) @map("order_index")
+
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  papers      Paper[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([orderIndex])
+  @@map("folders")
+}
+
+
+// ============================================================================
 // SECTION 3: PAPERS (SINGLE SOURCE OF TRUTH)
 //
 // This is THE authoritative table for all paper data.
@@ -153,6 +191,8 @@ model RefreshToken {
 model Paper {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId          String      @map("user_id") @db.Uuid
+
+  folderId        String?     @map("folder_id") @db.Uuid
 
   // === File Storage (Cloud) - SINGLE SOURCE FOR URL ===
   fileName        String      @map("file_name") @db.VarChar(255)
@@ -186,11 +226,13 @@ model Paper {
 
   // Relations
   user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder             Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
   conversations      Conversation[]
   relatedPapers      RelatedPaper[]
   highlights         Highlight[]
 
   @@index([userId])
+  @@index([folderId])
   @@index([ragFileId])
   @@index([status])
   @@map("papers")

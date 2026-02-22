@@ -13,6 +13,7 @@ import { CleanupModule } from './cleanup/cleanup.module';
 import { HighlightModule } from './highlight/highlight.module';
 import { RagModule } from './rag/rag.module';
 import { SessionModule } from './session/session.module';
+import { FolderModule } from './folder/folder.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SessionModule } from './session/session.module';
     CleanupModule,
     HighlightModule,
     SessionModule,
+    FolderModule,
   ],
 })
 export class AppModule {}
