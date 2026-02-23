@@ -238,6 +238,29 @@ export class ChatService {
       },
     });
 
+    // 3b. Broadcast user message IMMEDIATELY so all session members see it
+    //     before the (potentially slow) RAG call begins.
+    if (conversation.isCollaborative) {
+      const senderUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { displayName: true, avatarUrl: true },
+      });
+
+      this.sessionGateway.broadcastMessage(conversationId, {
+        id: userMessage.id,
+        role: 'USER',
+        content: question,
+        userId,
+        displayName: senderUser?.displayName || 'User',
+        avatarUrl: senderUser?.avatarUrl || undefined,
+        imageUrl: imageUrl || undefined,
+        createdAt: userMessage.createdAt,
+      });
+
+      // Notify all members that the assistant is processing
+      this.sessionGateway.broadcastAssistantThinking(conversationId, true);
+    }
+
     // 4. Strip @Assistant prefix for RAG query (keep original in stored message)
     const ragQuestion = question.replace(/^@Assistant\s*/i, '').trim();
 
@@ -249,14 +272,24 @@ export class ChatService {
         ragQuestion,
       );
     } catch (error) {
-      // Create error message and throw
-      await this.prisma.message.create({
+      // Create error message
+      const errorMessage = await this.prisma.message.create({
         data: {
           conversationId,
           role: MessageRole.ASSISTANT,
           content: 'Sorry, I encountered an error processing your question.',
         },
       });
+      // Broadcast error to collaborative session
+      if (conversation.isCollaborative) {
+        this.sessionGateway.broadcastAssistantThinking(conversationId, false);
+        this.sessionGateway.broadcastMessage(conversationId, {
+          id: errorMessage.id,
+          role: 'ASSISTANT',
+          content: errorMessage.content,
+          createdAt: errorMessage.createdAt,
+        });
+      }
       throw error;
     }
 
@@ -287,26 +320,9 @@ export class ChatService {
       data: { updatedAt: new Date() },
     });
 
-    // 7b. Broadcast to collaborative session if applicable
+    // 7b. Broadcast assistant response to collaborative session
     if (conversation.isCollaborative) {
-      // Broadcast user message
-      const senderUser = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { displayName: true, avatarUrl: true },
-      });
-
-      this.sessionGateway.broadcastMessage(conversationId, {
-        id: userMessage.id,
-        role: 'USER',
-        content: question,
-        userId,
-        displayName: senderUser?.displayName || 'User',
-        avatarUrl: senderUser?.avatarUrl || undefined,
-        imageUrl: imageUrl || undefined,
-        createdAt: userMessage.createdAt,
-      });
-
-      // Broadcast assistant message
+      this.sessionGateway.broadcastAssistantThinking(conversationId, false);
       this.sessionGateway.broadcastMessage(conversationId, {
         id: assistantMessage.id,
         role: 'ASSISTANT',
@@ -665,40 +681,7 @@ export class ChatService {
       },
     });
 
-    // Call RAG explain-region endpoint via centralized RagService
-    let ragResponse;
-    try {
-      ragResponse = await this.ragService.explainRegion(
-        conversation.paper.ragFileId,
-        dto.question || 'Please analyze and explain this cropped region.',
-        dto.imageBase64,
-        dto.pageNumber,
-      );
-    } catch (error) {
-      await this.prisma.message.create({
-        data: {
-          conversationId,
-          role: MessageRole.ASSISTANT,
-          content: 'Sorry, I encountered an error analyzing this region.',
-        },
-      });
-      throw error;
-    }
-
-    // Create assistant message
-    const assistantMessage = await this.prisma.message.create({
-      data: {
-        conversationId,
-        role: MessageRole.ASSISTANT,
-        content: ragResponse.answer || '',
-        context: this.ragService.cleanContextForStorage(
-          ragResponse.context,
-        ) as any,
-      },
-    });
-
-    // Build and return raw result
-    // Broadcast to collaborative session if applicable
+    // Broadcast user message IMMEDIATELY so all session members see it
     if (conversation.isCollaborative) {
       const senderUser = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -716,6 +699,53 @@ export class ChatService {
         createdAt: userMessage.createdAt,
       });
 
+      this.sessionGateway.broadcastAssistantThinking(conversationId, true);
+    }
+
+    // Call RAG explain-region endpoint via centralized RagService
+    let ragResponse;
+    try {
+      ragResponse = await this.ragService.explainRegion(
+        conversation.paper.ragFileId,
+        dto.question || 'Please analyze and explain this cropped region.',
+        dto.imageBase64,
+        dto.pageNumber,
+      );
+    } catch (error) {
+      const errorMessage = await this.prisma.message.create({
+        data: {
+          conversationId,
+          role: MessageRole.ASSISTANT,
+          content: 'Sorry, I encountered an error analyzing this region.',
+        },
+      });
+      if (conversation.isCollaborative) {
+        this.sessionGateway.broadcastAssistantThinking(conversationId, false);
+        this.sessionGateway.broadcastMessage(conversationId, {
+          id: errorMessage.id,
+          role: 'ASSISTANT',
+          content: errorMessage.content,
+          createdAt: errorMessage.createdAt,
+        });
+      }
+      throw error;
+    }
+
+    // Create assistant message
+    const assistantMessage = await this.prisma.message.create({
+      data: {
+        conversationId,
+        role: MessageRole.ASSISTANT,
+        content: ragResponse.answer || '',
+        context: this.ragService.cleanContextForStorage(
+          ragResponse.context,
+        ) as any,
+      },
+    });
+
+    // Broadcast assistant response to collaborative session
+    if (conversation.isCollaborative) {
+      this.sessionGateway.broadcastAssistantThinking(conversationId, false);
       this.sessionGateway.broadcastMessage(conversationId, {
         id: assistantMessage.id,
         role: 'ASSISTANT',
