@@ -2,13 +2,17 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { S3Service } from '../upload/s3.service';
 import { RagService } from '../rag/index';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   GuestUploadResultDto,
   GuestAskQuestionDto,
   GuestAskQuestionResultDto,
   GuestCitationDto,
   GuestExplainRegionDto,
+  GuestMigrateRequestDto,
+  GuestMigrateResultDto,
 } from './dto/guest.dto';
+import { MessageRole, ConversationType } from '../../generated/prisma/client';
 
 @Injectable()
 export class GuestService {
@@ -22,6 +26,7 @@ export class GuestService {
   constructor(
     private readonly ragService: RagService,
     private readonly s3Service: S3Service,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -208,5 +213,170 @@ export class GuestService {
     c.layoutWidth = raw.layout_width ?? raw.metadata?.layout_width ?? null;
     c.layoutHeight = raw.layout_height ?? raw.metadata?.layout_height ?? null;
     return c;
+  }
+
+  // ============================================================
+  // Guest → Authenticated Migration
+  // ============================================================
+
+  /**
+   * Migrate guest data to authenticated user's account.
+   * Creates Paper + Conversation + Messages + SuggestedQuestions in a single transaction.
+   *
+   * The RAG file was already ingested during guest upload, so we only need to
+   * create the DB records (no re-ingest needed).
+   */
+  async migrate(
+    userId: string,
+    dto: GuestMigrateRequestDto,
+  ): Promise<GuestMigrateResultDto> {
+    const { ragFileId, fileName, fileUrl, folderId, messages, suggestions } =
+      dto;
+
+    // Validate the ragFileId exists in RAG (check ingest status)
+    const status = this.getIngestStatus(ragFileId);
+    if (status === 'PROCESSING') {
+      throw new BadRequestException(
+        'PDF is still being processed. Please wait before migrating.',
+      );
+    }
+
+    // Validate folderId ownership if provided
+    if (folderId) {
+      const folder = await this.prisma.folder.findUnique({
+        where: { id: folderId },
+      });
+      if (!folder || folder.userId !== userId) {
+        throw new BadRequestException('Folder not found or not owned by user');
+      }
+    }
+
+    // Check if this ragFileId was already migrated (prevent double migration)
+    const existingPaper = await this.prisma.paper.findUnique({
+      where: { ragFileId },
+    });
+    if (existingPaper) {
+      // Already migrated — return existing IDs instead of duplicating
+      const existingConv = await this.prisma.conversation.findFirst({
+        where: { paperId: existingPaper.id, userId },
+      });
+      return {
+        paperId: existingPaper.id,
+        conversationId: existingConv?.id ?? '',
+        messageCount: messages.length,
+        suggestionCount: suggestions?.length ?? 0,
+      };
+    }
+
+    // Perform migration in a single transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Create Paper record
+      const paper = await tx.paper.create({
+        data: {
+          userId,
+          folderId: folderId || null,
+          fileName,
+          fileUrl,
+          ragFileId,
+          status: status === 'COMPLETED' ? 'COMPLETED' : 'FAILED',
+          processedAt: status === 'COMPLETED' ? new Date() : undefined,
+        },
+      });
+
+      // 2. Create Conversation
+      const conversation = await tx.conversation.create({
+        data: {
+          userId,
+          paperId: paper.id,
+          type: ConversationType.SINGLE_PAPER,
+          title: fileName.replace(/\.pdf$/i, '') || 'Guest conversation',
+        },
+      });
+
+      // 3. Create Messages (preserve chronological order)
+      let messageCount = 0;
+      for (const msg of messages) {
+        const role =
+          msg.role === 'assistant' ? MessageRole.ASSISTANT : MessageRole.USER;
+
+        await tx.message.create({
+          data: {
+            conversationId: conversation.id,
+            userId: role === MessageRole.USER ? userId : null,
+            role,
+            content: msg.content,
+            imageUrl: msg.imageUrl || null,
+            modelName: msg.modelName || null,
+            tokenCount: msg.tokenCount || null,
+            context: msg.citations ? { citations: msg.citations } : {},
+            createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
+          },
+        });
+        messageCount++;
+      }
+
+      // 4. Create Suggested Questions (if any)
+      let suggestionCount = 0;
+      if (suggestions && suggestions.length > 0) {
+        for (const question of suggestions) {
+          await tx.suggestedQuestion.create({
+            data: {
+              conversationId: conversation.id,
+              question,
+            },
+          });
+          suggestionCount++;
+        }
+      }
+
+      return {
+        paperId: paper.id,
+        conversationId: conversation.id,
+        messageCount,
+        suggestionCount,
+      };
+    });
+
+    // Clean up in-memory ingest status (no longer needed)
+    this.ingestStatus.delete(ragFileId);
+
+    this.logger.log(
+      `✅ Guest migration completed: paper=${result.paperId}, conv=${result.conversationId}, msgs=${result.messageCount}`,
+    );
+
+    // Trigger background metadata extraction from RAG
+    // (title, abstract, authors, etc. — same as paper.service.triggerRagIngestion)
+    this.enrichPaperMetadata(result.paperId, ragFileId);
+
+    return result;
+  }
+
+  /**
+   * Enrich paper metadata from RAG in background (non-blocking).
+   * Fetches title, abstract, authors etc. from the already-ingested RAG data.
+   */
+  private async enrichPaperMetadata(
+    paperId: string,
+    ragFileId: string,
+  ): Promise<void> {
+    try {
+      // Query RAG for a summary to extract metadata
+      const summaryResponse = await this.ragService.summarizePaper(ragFileId);
+
+      if (summaryResponse.summary) {
+        await this.prisma.paper.update({
+          where: { id: paperId },
+          data: {
+            summary: summaryResponse.summary,
+          },
+        });
+        this.logger.log(`📝 Paper metadata enriched for ${paperId}`);
+      }
+    } catch (error) {
+      // Non-critical — metadata enrichment is best-effort
+      this.logger.warn(
+        `⚠️ Paper metadata enrichment failed for ${paperId}: ${error.message}`,
+      );
+    }
   }
 }

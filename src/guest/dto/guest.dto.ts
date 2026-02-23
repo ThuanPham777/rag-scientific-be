@@ -1,6 +1,15 @@
 // src/guest/dto/guest.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+  IsIn,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiResponseDto } from '../../common/dto/api-response.dto';
 
 // ========== Upload DTOs ==========
@@ -181,4 +190,119 @@ export class GuestExplainRegionDto {
   @IsString()
   @IsOptional()
   question?: string;
+}
+
+// ========== Migration DTOs ==========
+
+/**
+ * A single chat message from the guest session
+ */
+export class GuestMigrateMessageDto {
+  @ApiProperty({ description: 'Message role', enum: ['user', 'assistant'] })
+  @IsString()
+  @IsIn(['user', 'assistant'])
+  role: 'user' | 'assistant';
+
+  @ApiProperty({ description: 'Message content' })
+  @IsString()
+  @IsNotEmpty()
+  content: string;
+
+  @ApiPropertyOptional({
+    description: 'Image URL (for explain region messages)',
+  })
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Model name (assistant messages)' })
+  @IsString()
+  @IsOptional()
+  modelName?: string;
+
+  @ApiPropertyOptional({ description: 'Token count (assistant messages)' })
+  @IsNumber()
+  @IsOptional()
+  tokenCount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Citations JSON (assistant messages)',
+  })
+  @IsOptional()
+  citations?: any;
+
+  @ApiPropertyOptional({ description: 'Original created timestamp' })
+  @IsString()
+  @IsOptional()
+  createdAt?: string;
+}
+
+/**
+ * Guest data migration request - sent after guest logs in
+ */
+export class GuestMigrateRequestDto {
+  @ApiProperty({ description: 'RAG file ID from guest upload' })
+  @IsString()
+  @IsNotEmpty()
+  ragFileId: string;
+
+  @ApiProperty({ description: 'Original file name' })
+  @IsString()
+  @IsNotEmpty()
+  fileName: string;
+
+  @ApiProperty({ description: 'File URL (S3)' })
+  @IsString()
+  @IsNotEmpty()
+  fileUrl: string;
+
+  @ApiPropertyOptional({
+    description: 'Folder ID to assign paper to (null = unfiled)',
+  })
+  @IsString()
+  @IsOptional()
+  folderId?: string;
+
+  @ApiProperty({
+    description: 'Chat messages from guest session',
+    type: [GuestMigrateMessageDto],
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GuestMigrateMessageDto)
+  messages: GuestMigrateMessageDto[];
+
+  @ApiPropertyOptional({
+    description: 'Suggested questions generated during guest session',
+    type: [String],
+  })
+  @IsArray()
+  @IsOptional()
+  @IsString({ each: true })
+  suggestions?: string[];
+}
+
+/**
+ * Guest migration result data
+ */
+export class GuestMigrateResultDto {
+  @ApiProperty({ description: 'Created paper ID' })
+  paperId: string;
+
+  @ApiProperty({ description: 'Created conversation ID' })
+  conversationId: string;
+
+  @ApiProperty({ description: 'Number of messages migrated' })
+  messageCount: number;
+
+  @ApiProperty({ description: 'Number of suggestions migrated' })
+  suggestionCount: number;
+}
+
+/**
+ * Guest migration response
+ */
+export class GuestMigrateResponseDto extends ApiResponseDto<GuestMigrateResultDto> {
+  @ApiProperty({ type: GuestMigrateResultDto })
+  declare data: GuestMigrateResultDto;
 }

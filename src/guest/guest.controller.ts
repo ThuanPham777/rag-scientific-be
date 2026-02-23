@@ -7,6 +7,7 @@ import {
   Param,
   UseInterceptors,
   UploadedFile,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -16,6 +17,7 @@ import {
   ApiBody,
   ApiOkResponse,
   ApiParam,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { GuestService } from './guest.service';
 import {
@@ -24,8 +26,13 @@ import {
   GuestUploadResponseDto,
   GuestExplainRegionDto,
   GuestStatusResponseDto,
+  GuestMigrateRequestDto,
+  GuestMigrateResponseDto,
 } from './dto/guest.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { CurrentUserPayload } from '../auth/jwt.strategy';
 
 @ApiTags('Guest')
 @Controller('guest')
@@ -104,5 +111,27 @@ export class GuestController {
       data,
       'Region explained',
     ) as GuestAskQuestionResponseDto;
+  }
+
+  @Post('migrate')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Migrate guest data to authenticated user (requires authentication)',
+    description:
+      'After a guest logs in, this endpoint persists their uploaded paper, ' +
+      'chat history, and suggestions into the database under their account.',
+  })
+  @ApiOkResponse({ type: GuestMigrateResponseDto })
+  async migrateGuestData(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: GuestMigrateRequestDto,
+  ): Promise<GuestMigrateResponseDto> {
+    const data = await this.guestService.migrate(user.id, dto);
+    return ApiResponseDto.success(
+      data,
+      'Guest data migrated successfully',
+    ) as GuestMigrateResponseDto;
   }
 }
