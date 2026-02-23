@@ -364,6 +364,19 @@ export class SessionGateway
   }
 
   /**
+   * Broadcast assistant thinking state to all session participants.
+   * Used when @Assistant is invoked: emits immediately so all members
+   * see a thinking indicator while the AI processes the request.
+   */
+  broadcastAssistantThinking(conversationId: string, isThinking: boolean) {
+    const roomName = `session:${conversationId}`;
+    this.logger.log(
+      `[broadcastAssistantThinking] → room ${roomName} | isThinking: ${isThinking}`,
+    );
+    this.server.to(roomName).emit('session:assistant-thinking', { isThinking });
+  }
+
+  /**
    * Broadcast a reaction update to all session participants.
    */
   broadcastReactionUpdate(
