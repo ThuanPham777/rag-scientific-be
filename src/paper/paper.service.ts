@@ -377,14 +377,33 @@ export class PaperService {
   /**
    * Generate or retrieve cached summary for a paper
    * Calls RAG service and caches result in the `summary` column
+   * Supports both owner access and collaborative session access
    */
   async getSummary(userId: string, paperId: string): Promise<PaperSummaryDto> {
-    const paper = await this.prisma.paper.findFirst({
+    // First, try to find paper owned by user
+    let paper = await this.prisma.paper.findFirst({
       where: { id: paperId, userId },
     });
 
+    // If not found, check if user has collaborative access through a session
     if (!paper) {
-      throw new NotFoundException('Paper not found');
+      paper = await this.prisma.paper.findFirst({
+        where: {
+          id: paperId,
+          conversations: {
+            some: {
+              isCollaborative: true,
+              sessionMembers: {
+                some: { userId },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    if (!paper) {
+      throw new NotFoundException('Paper not found or access denied');
     }
 
     if (paper.status !== 'COMPLETED') {
@@ -418,6 +437,7 @@ export class PaperService {
 
   /**
    * Get related papers from arXiv, with caching in `related_papers` table
+   * Supports both owner access and collaborative session access
    */
   async getRelatedPapers(
     userId: string,
@@ -425,12 +445,30 @@ export class PaperService {
     topK: number = 5,
     maxResults: number = 30,
   ): Promise<RelatedPapersResultDto> {
-    const paper = await this.prisma.paper.findFirst({
+    // First, try to find paper owned by user
+    let paper = await this.prisma.paper.findFirst({
       where: { id: paperId, userId },
     });
 
+    // If not found, check if user has collaborative access through a session
     if (!paper) {
-      throw new NotFoundException('Paper not found');
+      paper = await this.prisma.paper.findFirst({
+        where: {
+          id: paperId,
+          conversations: {
+            some: {
+              isCollaborative: true,
+              sessionMembers: {
+                some: { userId },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    if (!paper) {
+      throw new NotFoundException('Paper not found or access denied');
     }
 
     if (paper.status !== 'COMPLETED') {
