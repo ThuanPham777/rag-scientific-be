@@ -7,7 +7,7 @@
 // ARCHITECTURE:
 // - Single PostgreSQL database shared by both services
 // - Backend (rag-scientific-be) owns: users, papers, conversations, etc.
-// - RAG service (RAG_BE_02) owns: rag_paper_cache, paper_content_summaries
+// - RAG service (rag service (Pipeline_RAG)) owns: rag_paper_cache, paper_content_summaries
 // - Coordination via `rag_file_id` UUID
 //
 // DESIGN PRINCIPLES:
@@ -36,15 +36,15 @@ datasource db {
 //
 // Table: rag_paper_cache
 // Purpose: Minimal RAG processing cache (file hash for rebuild detection)
-// Owner: RAG_BE_02
+// Owner: rag service (Pipeline_RAG)
 // Note: Does NOT store metadata - that's in `papers` table
 //
 // Table: paper_content_summaries
 // Purpose: Cache LLM-generated summaries for tables and images
-// Owner: RAG_BE_02
+// Owner: rag service (Pipeline_RAG)
 // ============================================================================
 
-/// RAG processing cache - managed by RAG service (RAG_BE_02)
+/// RAG processing cache - managed by rag service (Pipeline_RAG)
 model RagPaperCache {
   ragPaperId       String    @id @map("rag_paper_id") @db.VarChar(100)
   fileContentHash  String?   @map("file_content_hash") @db.VarChar(64)
@@ -54,7 +54,7 @@ model RagPaperCache {
   @@map("rag_paper_cache")
 }
 
-/// Paper content summaries - managed by RAG service (RAG_BE_02)
+/// Paper content summaries - managed by rag service (Pipeline_RAG)
 model PaperContentSummary {
   id            Int      @id @default(autoincrement())
   ragPaperId    String   @map("rag_paper_id") @db.VarChar(100)

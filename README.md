@@ -305,7 +305,7 @@ rag-scientific-be/
 │   │   └── cleanup.module.ts
 │   │
 │   ├── rag/                    # 🤖 RAG service integration
-│   │   ├── rag.service.ts     # HTTP client to RAG_BE_02
+│   │   ├── rag.service.ts     # HTTP client to rag service (Pipeline_RAG)
 │   │   ├── rag.module.ts
 │   │   └── dto/
 │   │

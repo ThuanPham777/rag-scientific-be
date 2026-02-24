@@ -19,7 +19,7 @@ export class PaperItemDto {
 
   @ApiProperty({
     description:
-      '⚠️ CRITICAL: RAG file_id - dùng để query RAG_BE_02 service. Maps to file_id trong tất cả RAG API calls (/query, /brainstorm, /status)',
+      '⚠️ CRITICAL: RAG file_id - dùng để query rag service (Pipeline_RAG). Maps to file_id trong tất cả RAG API calls (/query, /brainstorm, /status)',
     example: '8fc4b997-0165-41c4-8e5c-f2effa478855',
     format: 'uuid',
   })
