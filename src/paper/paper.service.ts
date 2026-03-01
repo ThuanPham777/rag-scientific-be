@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  InternalServerErrorException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -407,7 +409,9 @@ export class PaperService {
     }
 
     if (paper.status !== 'COMPLETED') {
-      throw new NotFoundException('Paper has not been processed yet');
+      throw new BadRequestException(
+        'Paper is still being processed. Please wait for ingestion to complete before requesting a summary.',
+      );
     }
 
     // Return cached summary if available
@@ -431,7 +435,15 @@ export class PaperService {
         `Summary generation failed for paper: ${paperId}`,
         error,
       );
-      throw error;
+      // Extract meaningful message from the RAG service error
+      const ragMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to generate summary: ${ragMessage}`,
+      );
     }
   }
 
@@ -472,7 +484,9 @@ export class PaperService {
     }
 
     if (paper.status !== 'COMPLETED') {
-      throw new NotFoundException('Paper has not been processed yet');
+      throw new BadRequestException(
+        'Paper is still being processed. Please wait for ingestion to complete before fetching related papers.',
+      );
     }
 
     // Check cache first
@@ -546,7 +560,15 @@ export class PaperService {
         `Related papers fetch failed for paper: ${paperId}`,
         error,
       );
-      throw error;
+      // Extract meaningful message from the RAG service error
+      const ragMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to fetch related papers: ${ragMessage}`,
+      );
     }
   }
 }
