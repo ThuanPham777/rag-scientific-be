@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  InternalServerErrorException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -370,6 +372,75 @@ export class PaperService {
     }
   }
 
+  /**
+   * Delete ALL papers owned by the user and cleanup associated resources.
+   * Papers with active GROUP conversations are skipped (not deleted).
+   * @returns The count of deleted papers and skipped paper IDs
+   */
+  async deleteAllPapers(
+    userId: string,
+  ): Promise<{ deletedCount: number; skippedIds: string[] }> {
+    // Fetch all papers owned by the user, including active GROUP conversation info
+    const papers = await this.prisma.paper.findMany({
+      where: { userId },
+      include: {
+        conversations: {
+          where: {
+            type: 'GROUP',
+            isCollaborative: true,
+          },
+          include: {
+            sessionMembers: {
+              where: { isActive: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (papers.length === 0) {
+      return { deletedCount: 0, skippedIds: [] };
+    }
+
+    // Separate papers into deletable and skipped (active GROUP sessions)
+    const deletable: typeof papers = [];
+    const skippedIds: string[] = [];
+
+    for (const paper of papers) {
+      const hasActiveGroup = paper.conversations.some(
+        (conv) => conv.sessionMembers.length > 0,
+      );
+      if (hasActiveGroup) {
+        skippedIds.push(paper.id);
+      } else {
+        deletable.push(paper);
+      }
+    }
+
+    if (deletable.length === 0) {
+      return { deletedCount: 0, skippedIds };
+    }
+
+    const deletableIds = deletable.map((p) => p.id);
+
+    // Batch delete from database (cascade handles conversations, messages, etc.)
+    await this.prisma.paper.deleteMany({
+      where: { id: { in: deletableIds } },
+    });
+
+    // Background cleanup: S3 files and RAG data (fire-and-forget)
+    for (const paper of deletable) {
+      this.deleteS3File(paper.fileUrl);
+      this.cleanupRagData(paper.ragFileId);
+    }
+
+    this.logger.log(
+      `Deleted ${deletable.length} papers for user ${userId}, skipped ${skippedIds.length} (active GROUP sessions)`,
+    );
+
+    return { deletedCount: deletable.length, skippedIds };
+  }
+
   // ============================================================
   // Summary, Related Papers, Brainstorm Questions
   // ============================================================
@@ -407,7 +478,9 @@ export class PaperService {
     }
 
     if (paper.status !== 'COMPLETED') {
-      throw new NotFoundException('Paper has not been processed yet');
+      throw new BadRequestException(
+        'Paper is still being processed. Please wait for ingestion to complete before requesting a summary.',
+      );
     }
 
     // Return cached summary if available
@@ -431,7 +504,15 @@ export class PaperService {
         `Summary generation failed for paper: ${paperId}`,
         error,
       );
-      throw error;
+      // Extract meaningful message from the RAG service error
+      const ragMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to generate summary: ${ragMessage}`,
+      );
     }
   }
 
@@ -472,7 +553,9 @@ export class PaperService {
     }
 
     if (paper.status !== 'COMPLETED') {
-      throw new NotFoundException('Paper has not been processed yet');
+      throw new BadRequestException(
+        'Paper is still being processed. Please wait for ingestion to complete before fetching related papers.',
+      );
     }
 
     // Check cache first
@@ -546,7 +629,15 @@ export class PaperService {
         `Related papers fetch failed for paper: ${paperId}`,
         error,
       );
-      throw error;
+      // Extract meaningful message from the RAG service error
+      const ragMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to fetch related papers: ${ragMessage}`,
+      );
     }
   }
 }
