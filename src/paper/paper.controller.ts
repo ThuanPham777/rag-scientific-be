@@ -122,7 +122,8 @@ export class PaperController {
   @Get('search')
   @ApiOperation({
     summary: 'Search across all user papers',
-    description: 'Performs semantic search over the contents of every paper the user has processed and returns matching snippets as citations.',
+    description:
+      'Performs semantic search over the contents of every paper the user has processed and returns matching snippets as citations.',
   })
   @ApiQuery({ name: 'term', required: true, description: 'Search term' })
   async search(
@@ -164,22 +165,7 @@ export class PaperController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Delete paper and all associated data',
-    description: `Permanently delete a paper and all related data.
-
-**What gets deleted:**
-- Database record (paper, conversations, messages)
-- PDF file from cloud storage
-- Vector embeddings from RAG system
-- All associated chat history
-
-**⚠️ Warning:** This action is irreversible!
-
-**Cascading Deletions:**
-- All conversations for this paper
-- All messages in those conversations
-- All highlights and comments
-
-**Background Processing:** File deletion happens asynchronously`,
+    description: 'Permanently delete a paper and all related data.',
   })
   @ApiParam({ name: 'id', description: 'Paper ID' })
   @ApiOkResponse({ type: DeletePaperResponseDto })
@@ -191,6 +177,37 @@ export class PaperController {
     return EmptyResponseDto.success(
       'Paper deleted successfully',
     ) as DeletePaperResponseDto;
+  }
+
+  @Delete()
+  @ApiOperation({
+    summary: 'Delete all papers owned by the user',
+    description:
+      'Permanently delete ALL papers belonging to the authenticated user.',
+  })
+  @ApiOkResponse({
+    schema: {
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            deletedCount: { type: 'number' },
+            skippedIds: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+    },
+  })
+  async deleteAll(@CurrentUser() user: CurrentUserPayload) {
+    const result = await this.paperService.deleteAllPapers(user.id);
+    return ApiResponseDto.success(
+      result,
+      result.deletedCount > 0
+        ? `Deleted ${result.deletedCount} paper(s) successfully`
+        : 'No papers to delete',
+    );
   }
 
   // ============================================================
