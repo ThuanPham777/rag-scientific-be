@@ -132,6 +132,29 @@ All endpoints return consistent error responses with appropriate HTTP status cod
     },
   });
 
+  // --- START YJS WEBSOCKET SERVER ---
+  const yjsPort = process.env.YJS_PORT || 1234;
+  const http = require('http');
+  const { WebSocketServer } = require('ws');
+  const { setupWSConnection } = require('y-websocket/bin/utils');
+
+  const yjsServer = http.createServer((req: any, res: any) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Yjs WebSocket Server running');
+  });
+
+  const wss = new WebSocketServer({ server: yjsServer });
+
+  wss.on('connection', (conn: any, req: any) => {
+    setupWSConnection(conn, req);
+    logger.log(`[Yjs] New connection. Total: ${wss.clients.size}`);
+  });
+
+  yjsServer.listen(yjsPort, () => {
+    logger.log(`🔄 Yjs WebSocket server running on ws://localhost:${yjsPort}`);
+  });
+  // --- END YJS WEBSOCKET SERVER ---
+
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
   logger.log(`🚀 Application running on: http://localhost:${port}`);

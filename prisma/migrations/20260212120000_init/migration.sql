@@ -363,13 +363,35 @@ CREATE TABLE "related_papers"
         "title" VARCHAR(500) NOT NULL DEFAULT 'Untitled',
         "content" TEXT NOT NULL DEFAULT '',
         "order_index" INTEGER NOT NULL DEFAULT 0,
+        "is_collaborative" BOOLEAN NOT NULL DEFAULT false,
+        "share_token" VARCHAR(100),
+        "original_id" UUID,
         "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updated_at" TIMESTAMPTZ NOT NULL,
         CONSTRAINT "notebooks_pkey" PRIMARY KEY ("id")
     );
 
+    CREATE UNIQUE INDEX "notebooks_share_token_key" ON "notebooks"("share_token");
     CREATE INDEX "notebooks_user_id_idx" ON "notebooks"("user_id");
     CREATE INDEX "notebooks_updated_at_idx" ON "notebooks"("updated_at");
+    CREATE INDEX "notebooks_share_token_idx" ON "notebooks"("share_token");
+
+    -- ============================================================================
+    -- TABLE: notebook_collaborators
+    -- ============================================================================
+
+    CREATE TABLE "notebook_collaborators"
+    (
+        "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+        "notebook_id" UUID NOT NULL,
+        "user_id" UUID NOT NULL,
+        "joined_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "notebook_collaborators_pkey" PRIMARY KEY ("id")
+    );
+
+    CREATE UNIQUE INDEX "notebook_collaborators_notebook_id_user_id_key" ON "notebook_collaborators"("notebook_id", "user_id");
+    CREATE INDEX "notebook_collaborators_notebook_id_idx" ON "notebook_collaborators"("notebook_id");
+    CREATE INDEX "notebook_collaborators_user_id_idx" ON "notebook_collaborators"("user_id");
 
     -- ============================================================================
     -- FOREIGN KEY CONSTRAINTS
@@ -442,3 +464,17 @@ CREATE TABLE "related_papers"
 
     ALTER TABLE "notebooks" ADD CONSTRAINT "notebooks_user_id_fkey"
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+    ALTER TABLE "notebook_collaborators" ADD CONSTRAINT "notebook_collaborators_notebook_id_fkey"
+    FOREIGN KEY ("notebook_id") REFERENCES "notebooks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+    ALTER TABLE "notebook_collaborators" ADD CONSTRAINT "notebook_collaborators_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- ============================================================================
+-- ADD is_hidden COLUMN TO notebook_collaborators
+-- Allows shared users to soft-hide a shared notebook from their "Shared with me"
+-- list without actually deleting the notebook (only the owner can truly delete).
+-- ============================================================================
+ALTER TABLE "notebook_collaborators"
+    ADD COLUMN "is_hidden" BOOLEAN NOT NULL DEFAULT false;

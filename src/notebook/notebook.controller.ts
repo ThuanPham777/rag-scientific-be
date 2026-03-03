@@ -32,10 +32,10 @@ import { ApiResponseDto } from '../common/dto/api-response.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('notebooks')
 export class NotebookController {
-  constructor(private readonly notebookService: NotebookService) {}
+  constructor(private readonly notebookService: NotebookService) { }
 
   @Get()
-  @ApiOperation({ summary: 'Get all notebooks for current user' })
+  @ApiOperation({ summary: 'Get all notebooks owned by current user' })
   @ApiOkResponse({ type: ListNotebooksResponseDto })
   async findAll(@Request() req: any): Promise<ListNotebooksResponseDto> {
     const data = await this.notebookService.findAllByUser(req.user.id);
@@ -43,6 +43,14 @@ export class NotebookController {
       data,
       'List of notebooks',
     ) as ListNotebooksResponseDto;
+  }
+
+  // NOTE: This route must be declared BEFORE ":id" routes to avoid conflicts
+  @Get('shared-with-me')
+  @ApiOperation({ summary: 'Get notebooks shared with the current user' })
+  async getSharedWithMe(@Request() req: any) {
+    const data = await this.notebookService.getSharedWithMe(req.user.id);
+    return ApiResponseDto.success(data, 'Notebooks shared with you');
   }
 
   @Get(':id')
@@ -93,7 +101,7 @@ export class NotebookController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a notebook' })
+  @ApiOperation({ summary: 'Delete a notebook (owner) or hide it (collaborator)' })
   @ApiParam({ name: 'id', description: 'Notebook ID' })
   @ApiOkResponse({ type: DeleteNotebookResponseDto })
   @ApiResponse({ status: 404, description: 'Notebook not found' })
@@ -104,7 +112,60 @@ export class NotebookController {
     const data = await this.notebookService.remove(id, req.user.id);
     return ApiResponseDto.success(
       data,
-      'Notebook deleted successfully',
+      data.message,
     ) as DeleteNotebookResponseDto;
+  }
+
+  // =========================================================================
+  // COLLABORATION ENDPOINTS
+  // =========================================================================
+
+  @Post(':id/share')
+  @ApiOperation({ summary: 'Share a notebook (creates a collaborative copy)' })
+  @ApiParam({ name: 'id', description: 'Notebook ID to share' })
+  async share(
+    @Param('id') id: string,
+    @Request() req: any,
+  ) {
+    const data = await this.notebookService.shareNotebook(id, req.user.id);
+    return ApiResponseDto.success(data, 'Notebook shared');
+  }
+
+  @Post('join/:token')
+  @ApiOperation({ summary: 'Join a shared notebook via invite token' })
+  @ApiParam({ name: 'token', description: 'Share token' })
+  async joinByToken(
+    @Param('token') token: string,
+    @Request() req: any,
+  ) {
+    const data = await this.notebookService.joinByToken(token, req.user.id);
+    return ApiResponseDto.success(data, 'Joined notebook');
+  }
+
+  @Get('collab/:id')
+  @ApiOperation({ summary: 'Get a collaborative notebook (any collaborator)' })
+  @ApiParam({ name: 'id', description: 'Collaborative notebook ID' })
+  async findCollaborative(
+    @Param('id') id: string,
+    @Request() req: any,
+  ) {
+    const data = await this.notebookService.findCollaborative(id, req.user.id);
+    return ApiResponseDto.success(data, 'Collaborative notebook');
+  }
+
+  @Put('collab/:id')
+  @ApiOperation({ summary: 'Update a collaborative notebook' })
+  @ApiParam({ name: 'id', description: 'Collaborative notebook ID' })
+  async updateCollaborative(
+    @Param('id') id: string,
+    @Body() dto: UpdateNotebookDto,
+    @Request() req: any,
+  ) {
+    const data = await this.notebookService.updateCollaborative(
+      id,
+      req.user.id,
+      dto,
+    );
+    return ApiResponseDto.success(data, 'Collaborative notebook updated');
   }
 }

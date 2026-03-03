@@ -17,6 +17,12 @@ export class NotebookItemDto {
   @ApiProperty({ description: 'Order index', example: 0 })
   orderIndex!: number;
 
+  @ApiProperty({ description: 'Is collaborative', example: false })
+  isCollaborative!: boolean;
+
+  @ApiPropertyOptional({ description: 'Share token for collaboration' })
+  shareToken?: string;
+
   @ApiProperty({ description: 'Created timestamp', format: 'date-time' })
   createdAt!: Date;
 
