@@ -18,7 +18,6 @@ import { OAuth2Client } from 'google-auth-library';
 import { createHash, randomBytes } from 'crypto';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { GoogleCodeAuthDto } from './dto/google-code-auth.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordRequestDto } from './dto/forgot-password-request.dto';
 import { ResetPasswordRequestDto } from './dto/reset-password-request.dto';
 
@@ -94,6 +93,30 @@ export class AuthService {
     const refreshTtl =
       this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
     return this.parseExpiryToDate(refreshTtl);
+  }
+
+  /**
+   * Get refresh token max-age in milliseconds (for cookie maxAge)
+   */
+  getRefreshTokenMaxAgeMs(): number {
+    const refreshTtl =
+      this.config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    const match = refreshTtl.match(/^(\d+)([smhd])$/);
+    if (!match) return 7 * 24 * 60 * 60 * 1000; // fallback 7 days
+    const [, amount, unit] = match;
+    const num = parseInt(amount, 10);
+    switch (unit) {
+      case 's':
+        return num * 1000;
+      case 'm':
+        return num * 60 * 1000;
+      case 'h':
+        return num * 60 * 60 * 1000;
+      case 'd':
+        return num * 24 * 60 * 60 * 1000;
+      default:
+        return 7 * 24 * 60 * 60 * 1000;
+    }
   }
 
   /**
@@ -385,23 +408,24 @@ export class AuthService {
   // ========================
   /**
    * Refresh access and refresh tokens
+   * @param refreshToken The raw refresh token string (from HTTP-only cookie)
    * @returns Raw login result with new tokens
    */
   async refreshTokens(
-    dto: RefreshTokenDto,
+    refreshToken: string,
     deviceInfo?: string,
     ipAddress?: string,
   ): Promise<LoginResultDto> {
     // Verify the refresh token JWT
     let decoded: any;
     try {
-      decoded = this.jwt.verify(dto.refreshToken);
+      decoded = this.jwt.verify(refreshToken);
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
     // Check token in DB
-    const hashedToken = this.hashToken(dto.refreshToken);
+    const hashedToken = this.hashToken(refreshToken);
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { token: hashedToken },
       include: { user: true },
