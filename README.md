@@ -21,8 +21,11 @@ NestJS Backend API với các tính năng:
 
 - User authentication (Email/Password + Google OAuth)
 - Paper management (upload PDF, organize với folders)
-- AI Chat với RAG integration
-- PDF highlighting & comments
+- AI Chat với RAG integration (single/multi-paper Q&A)
+- Collaborative sessions (real-time multi-user chat & annotations)
+- PDF highlighting & threaded comments
+- Rich-text notebooks với collaborative editing (Yjs CRDT)
+- Guest mode (anonymous 24h TTL)
 - Email service (password reset)
 
 ## ✨ Features
@@ -30,15 +33,18 @@ NestJS Backend API với các tính năng:
 - 🔐 JWT Authentication (Access/Refresh tokens)
 - 🔑 Google OAuth 2.0
 - 📄 Paper upload & management (AWS S3)
-- 💬 AI Chat (single/multi-paper Q&A)
+- 📂 Folder organization (library management)
+- 💬 AI Chat (single/multi-paper Q&A via RAG)
 - 🤝 Collaborative Sessions (real-time multi-user chat)
-- ✏️ PDF highlighting & comments
+- ✏️ PDF highlighting & threaded comments
 - 💬 Message reactions & threaded replies
+- 📓 Rich-text Notebooks (Tiptap editor)
+- 🔄 Notebook Collaboration (Yjs CRDT real-time sync)
 - 📧 Password reset email (Resend)
 - 🎯 Guest mode (24h TTL auto-cleanup)
 - 📖 Swagger API documentation
 - 🗃️ Prisma ORM (type-safe database)
-- 🔌 WebSocket support (real-time updates)
+- 🔌 WebSocket (Socket.IO for sessions + Yjs for notebooks)
 
 ## 📋 Prerequisites
 
@@ -67,7 +73,7 @@ npm run start:dev
 **Truy cập:**
 
 - API: http://localhost:3000
-- Swagger: http://localhost:3000/api
+- Swagger: http://localhost:3000/docs
 
 ## 🚀 Installation
 
@@ -216,7 +222,7 @@ Server chạy tại: http://localhost:3000
 
 ## 📚 Swagger API Docs
 
-Truy cập: http://localhost:3000/api
+Truy cập: http://localhost:3000/docs
 
 **Cách dùng:**
 
@@ -282,6 +288,16 @@ rag-scientific-be/
 │   │   ├── guest.controller.ts
 │   │   └── guest.service.ts
 │   │
+│   ├── folder/                 # 📂 Folder organization
+│   │   ├── dto/
+│   │   ├── folder.controller.ts
+│   │   └── folder.service.ts
+│   │
+│   ├── notebook/               # 📓 Rich-text Notebooks
+│   │   ├── dto/
+│   │   ├── notebook.controller.ts
+│   │   └── notebook.service.ts  # Share, join, collab
+│   │
 │   ├── highlight/              # ✏️ PDF highlighting & annotations
 │   │   ├── dto/               # Highlight, Comment DTOs
 │   │   ├── highlight.controller.ts
@@ -318,8 +334,9 @@ rag-scientific-be/
 │   │   ├── decorators/        # @CurrentUser decorator
 │   │   └── constants/         # App-wide constants
 │   │
-│   ├── app.module.ts           # Root module
-│   └── main.ts                 # Application entry point
+│   ├── app.module.ts           # Root module (16 modules + ConfigModule + ScheduleModule)
+│   ├── main.ts                 # Bootstrap: CORS, Swagger (/docs), ValidationPipe
+│   └── yjs-server.cjs          # Standalone Yjs WebSocket server (port 1234)
 │
 ├── test/                       # E2E tests
 └── package.json
@@ -336,7 +353,7 @@ rag-scientific-be/
 | `POST` | `/auth/google`          | Đăng nhập Google (ID Token)  | ❌   |
 | `POST` | `/auth/google/code`     | Đăng nhập Google (Auth Code) | ❌   |
 | `POST` | `/auth/refresh`         | Refresh access token         | ❌   |
-| `POST` | `/auth/logout`          | Đăng xuất (revoke token)     | ✅   |
+| `POST` | `/auth/logout`          | Đăng xuất (revoke token)     | ❌   |
 | `POST` | `/auth/logout-all`      | Đăng xuất tất cả thiết bị    | ✅   |
 | `POST` | `/auth/forgot-password` | Gửi email reset mật khẩu     | ❌   |
 | `POST` | `/auth/reset-password`  | Reset mật khẩu với token     | ❌   |
@@ -347,8 +364,10 @@ rag-scientific-be/
 | -------- | ---------------------------- | ---------------------------- | ---- |
 | `POST`   | `/papers`                    | Tạo paper mới (sau upload)   | ✅   |
 | `GET`    | `/papers`                    | Danh sách papers của user    | ✅   |
+| `GET`    | `/papers/search?term=`       | Tìm kiếm papers (semantic)   | ✅   |
 | `GET`    | `/papers/:id`                | Chi tiết 1 paper             | ✅   |
 | `DELETE` | `/papers/:id`                | Xóa paper                    | ✅   |
+| `DELETE` | `/papers`                    | Xóa tất cả papers            | ✅   |
 | `POST`   | `/papers/:id/summary`        | Generate paper summary (LLM) | ✅   |
 | `POST`   | `/papers/:id/related-papers` | Tìm papers liên quan (arXiv) | ✅   |
 
@@ -373,17 +392,18 @@ rag-scientific-be/
 
 ### Chat (`/chat`)
 
-| Method   | Endpoint                         | Description                    | Auth |
-| -------- | -------------------------------- | ------------------------------ | ---- |
-| `POST`   | `/chat/ask`                      | Hỏi về 1 paper                 | ✅   |
-| `POST`   | `/chat/send-message`             | Gửi message vào conversation   | ✅   |
-| `POST`   | `/chat/ask-multi`                | Hỏi về nhiều papers            | ✅   |
-| `POST`   | `/chat/explain-region`           | Giải thích vùng chọn trong PDF | ✅   |
-| `GET`    | `/chat/messages/:conversationId` | Lịch sử chat                   | ✅   |
-| `DELETE` | `/chat/history/:conversationId`  | Xóa lịch sử                    | ✅   |
-| `POST`   | `/chat/reactions/toggle`         | Toggle reaction trên message   | ✅   |
-| `POST`   | `/chat/reply`                    | Reply to specific message      | ✅   |
-| `POST`   | `/chat/delete-message`           | Soft delete message            | ✅   |
+| Method   | Endpoint                         | Description                     | Auth |
+| -------- | -------------------------------- | ------------------------------- | ---- |
+| `POST`   | `/chat/ask`                      | Hỏi về 1 paper                  | ✅   |
+| `POST`   | `/chat/send-message`             | Gửi message vào conversation    | ✅   |
+| `POST`   | `/chat/generate`                 | Freeform AI generation (Ask AI) | ✅   |
+| `POST`   | `/chat/ask-multi`                | Hỏi về nhiều papers             | ✅   |
+| `POST`   | `/chat/explain-region`           | Giải thích vùng chọn trong PDF  | ✅   |
+| `GET`    | `/chat/messages/:conversationId` | Lịch sử chat                    | ✅   |
+| `DELETE` | `/chat/history/:conversationId`  | Xóa lịch sử                     | ✅   |
+| `POST`   | `/chat/reactions/toggle`         | Toggle reaction trên message    | ✅   |
+| `POST`   | `/chat/reply`                    | Reply to specific message       | ✅   |
+| `POST`   | `/chat/delete-message`           | Soft delete message             | ✅   |
 
 ### Conversations (`/conversations`)
 
@@ -425,11 +445,40 @@ rag-scientific-be/
 
 ### Guest (`/guest`)
 
-| Method | Endpoint                   | Description             | Auth |
-| ------ | -------------------------- | ----------------------- | ---- |
-| `POST` | `/guest/upload`            | Upload PDF (guest mode) | ❌   |
-| `GET`  | `/guest/status/:ragFileId` | Check ingest status     | ❌   |
-| `POST` | `/guest/ask`               | Hỏi về paper (guest)    | ❌   |
+| Method | Endpoint                   | Description                 | Auth |
+| ------ | -------------------------- | --------------------------- | ---- |
+| `POST` | `/guest/upload`            | Upload PDF (guest mode)     | ❌   |
+| `GET`  | `/guest/status/:ragFileId` | Check ingest status         | ❌   |
+| `POST` | `/guest/ask`               | Hỏi về paper (guest)        | ❌   |
+| `POST` | `/guest/explain-region`    | Giải thích vùng PDF (guest) | ❌   |
+| `POST` | `/guest/migrate`           | Migrate guest data to user  | ✅   |
+
+### Folders (`/folders`)
+
+| Method   | Endpoint                        | Description                  | Auth |
+| -------- | ------------------------------- | ---------------------------- | ---- |
+| `GET`    | `/folders`                      | Danh sách folders            | ✅   |
+| `GET`    | `/folders/uncategorized`        | Papers không có folder       | ✅   |
+| `GET`    | `/folders/:id`                  | Chi tiết folder + papers     | ✅   |
+| `POST`   | `/folders`                      | Tạo folder mới               | ✅   |
+| `PUT`    | `/folders/:id`                  | Cập nhật folder              | ✅   |
+| `DELETE` | `/folders/:id`                  | Xóa folder                   | ✅   |
+| `PATCH`  | `/folders/papers/:paperId/move` | Di chuyển paper giữa folders | ✅   |
+
+### Notebooks (`/notebooks`)
+
+| Method   | Endpoint                    | Description                      | Auth |
+| -------- | --------------------------- | -------------------------------- | ---- |
+| `GET`    | `/notebooks`                | Danh sách notebooks              | ✅   |
+| `GET`    | `/notebooks/shared-with-me` | Notebooks được share             | ✅   |
+| `GET`    | `/notebooks/:id`            | Chi tiết notebook                | ✅   |
+| `POST`   | `/notebooks`                | Tạo notebook mới                 | ✅   |
+| `PUT`    | `/notebooks/:id`            | Cập nhật notebook (auto-save)    | ✅   |
+| `DELETE` | `/notebooks/:id`            | Xóa / ẩn notebook                | ✅   |
+| `POST`   | `/notebooks/:id/share`      | Share notebook (tạo collab copy) | ✅   |
+| `POST`   | `/notebooks/join/:token`    | Join shared notebook             | ✅   |
+| `GET`    | `/notebooks/collab/:id`     | Get collaborative notebook       | ✅   |
+| `PUT`    | `/notebooks/collab/:id`     | Update collaborative notebook    | ✅   |
 
 ### Health Check
 
@@ -437,7 +486,7 @@ rag-scientific-be/
 | ------ | -------- | ------------ | ---- |
 | `GET`  | `/`      | Health check | ❌   |
 
-> 📖 **Swagger UI**: http://localhost:3000/api
+> 📖 **Swagger UI**: http://localhost:3000/docs
 
 ## 🔧 Development Commands
 
@@ -470,10 +519,12 @@ Chi tiết schema, relationships, và design decisions:
 ## 🛠️ Tech Stack
 
 - NestJS 10 + TypeScript 5
-- PostgreSQL + Prisma ORM
+- PostgreSQL + Prisma ORM 6
 - JWT + Passport.js
 - Google OAuth 2.0
 - AWS S3
+- Socket.IO (WebSocket for sessions)
+- Yjs + y-websocket (collaborative notebooks)
 - Resend (email)
 - Swagger/OpenAPI
 

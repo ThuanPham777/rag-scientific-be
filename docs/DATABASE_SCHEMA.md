@@ -6,8 +6,13 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 
 1. **User Management**: Xác thực đa nền tảng (Local + Google OAuth)
 2. **Paper Management**: Quản lý tài liệu PDF và tích hợp RAG service
-3. **Conversation System**: Lưu trữ lịch sử chat với AI
-4. **Caching Layer**: Cache kết quả AI để tối ưu hiệu suất
+3. **Folder Organization**: Tổ chức papers vào thư mục
+4. **Conversation System**: Lưu trữ lịch sử chat với AI
+5. **Collaborative Sessions**: Real-time multi-user sessions với WebSocket
+6. **Notebook Collaboration**: Rich-text notebooks với Yjs CRDT real-time editing
+7. **Caching Layer**: Cache kết quả AI để tối ưu hiệu suất
+
+**Total Tables**: 18 (16 NestJS-owned + 2 RAG-owned)
 
 ---
 
@@ -112,6 +117,18 @@ RAG Scientific sử dụng PostgreSQL làm database chính với Prisma ORM. Sch
 │ user_id (FK)        │
 │ content             │
 │ ...                 │
+└─────────────────────┘
+
+┌─────────────────────┐        ┌──────────────────────────┐
+│     notebooks       │──1:N──▶│ notebook_collaborators   │
+├─────────────────────┤        ├──────────────────────────┤
+│ id (PK)             │        │ id (PK)                  │
+│ user_id (FK)        │        │ notebook_id (FK)         │
+│ title               │        │ user_id (FK)             │
+│ content (TEXT)      │        │ is_hidden                │
+│ is_collaborative    │        └──────────────────────────┘
+│ share_token (UQ)    │
+│ original_id         │
 └─────────────────────┘
 ```
 
@@ -502,7 +519,7 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-### 9. `related_papers` - Papers liên quan từ arXiv
+### 10. `related_papers` - Papers liên quan từ arXiv
 
 **Mục đích**: Cache kết quả tìm kiếm papers liên quan từ arXiv API (qua RAG service).
 
@@ -527,7 +544,7 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-### 10. `highlights` - Highlight trên PDF
+### 11. `highlights` - Highlight trên PDF
 
 **Mục đích**: Lưu trữ các vùng text được highlight trên PDF với thông tin vị trí và màu sắc.
 
@@ -557,7 +574,7 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-### 11. `highlight_comments` - Comment trên highlight
+### 12. `highlight_comments` - Comment trên highlight
 
 **Mục đích**: Lưu trữ comments được thêm vào các highlights.
 
@@ -574,7 +591,7 @@ PENDING → PROCESSING → COMPLETED
 
 ## 🤝 Collaborative Session Tables
 
-### 12. `session_members` - Session Membership
+### 13. `session_members` - Session Membership
 
 **Mục đích**: Quản lý members trong collaborative sessions (many-to-many relationship giữa users và conversations).
 
@@ -608,7 +625,7 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
-### 13. `session_invites` - Invite Links
+### 14. `session_invites` - Invite Links
 
 **Mục đích**: Quản lý shareable invite links cho collaborative sessions.
 
@@ -639,36 +656,100 @@ PENDING → PROCESSING → COMPLETED
 
 ---
 
+### 15. `notebooks` - Rich-text Notebooks
+
+**Mục đích**: Lưu trữ notebooks với nội dung HTML (Tiptap editor), hỗ trợ cả mode cá nhân và collaborative editing via Yjs CRDT.
+
+| Column             | Type         | Constraints          | Mô tả                                           |
+| ------------------ | ------------ | -------------------- | ----------------------------------------------- |
+| `id`               | UUID         | PK, auto             | ID notebook                                     |
+| `user_id`          | UUID         | FK → users, NOT NULL | Owner của notebook                              |
+| `title`            | VARCHAR(500) | DEFAULT 'Untitled'   | Tiêu đề notebook                                |
+| `content`          | TEXT         | DEFAULT ''           | HTML content (Tiptap format)                    |
+| `order_index`      | INTEGER      | DEFAULT 0            | Thứ tự hiển thị                                 |
+| `is_collaborative` | BOOLEAN      | DEFAULT false        | Có phải collaborative notebook không            |
+| `share_token`      | VARCHAR(100) | NULL, UNIQUE         | Token để share (null nếu chưa share)            |
+| `original_id`      | UUID         | NULL                 | ID của notebook gốc (nếu là copy collaborative) |
+| `created_at`       | TIMESTAMPTZ  | DEFAULT NOW          | Ngày tạo                                        |
+| `updated_at`       | TIMESTAMPTZ  | DEFAULT NOW          | Ngày cập nhật                                   |
+
+**Constraints**:
+
+- `notebooks_share_token_key` (UNIQUE): Share token unique globally
+
+**Business Rules**:
+
+- Khi share: tạo copy mới với `is_collaborative = true` và `share_token`
+- `original_id` link đến notebook gốc (dùng để track origin)
+- Collaborative notebooks sử dụng Yjs CRDT qua standalone WebSocket server (port 1234)
+- Room name = notebook UUID trong URL: `ws://localhost:1234/{notebook-id}`
+- Mỗi collaborator connect trực tiếp đến Yjs server, KHÔNG qua NestJS Socket.IO
+
+---
+
+### 16. `notebook_collaborators` - Notebook Collaboration Membership
+
+**Mục đích**: Quản lý members trong collaborative notebooks (many-to-many relationship giữa users và notebooks).
+
+| Column        | Type        | Constraints    | Mô tả                              |
+| ------------- | ----------- | -------------- | ---------------------------------- |
+| `id`          | UUID        | PK, auto       | ID membership                      |
+| `notebook_id` | UUID        | FK → notebooks | Notebook collaborative             |
+| `user_id`     | UUID        | FK → users     | User là collaborator               |
+| `joined_at`   | TIMESTAMPTZ | DEFAULT NOW    | Thời điểm join                     |
+| `is_hidden`   | BOOLEAN     | DEFAULT false  | User đã ẩn notebook khỏi danh sách |
+
+**Constraints**:
+
+- `notebook_collaborators_notebook_id_user_id_key` (UNIQUE): Mỗi user chỉ join 1 lần per notebook
+
+**Business Rules**:
+
+- Owner là collaborator đầu tiên (thêm khi share)
+- Khi user "delete" notebook mà không phải owner → set `is_hidden = true` (soft-hide)
+- Khi user re-join via token → set `is_hidden = false`
+- Owner xóa collaborative notebook → xóa toàn bộ (CASCADE)
+
+---
+
 ## 🔄 Cascade Rules
 
-| Parent        | Child               | On Delete |
-| ------------- | ------------------- | --------- |
-| users         | refresh_tokens      | CASCADE   |
-| users         | papers              | CASCADE   |
-| users         | conversations       | CASCADE   |
-| users         | highlights          | CASCADE   |
-| users         | highlight_comments  | CASCADE   |
-| users         | session_members     | CASCADE   |
-| users         | session_invites     | CASCADE   |
-| users         | message_reactions   | CASCADE   |
-| papers        | conversations       | CASCADE   |
-| papers        | suggested_questions | CASCADE   |
-| papers        | related_papers      | CASCADE   |
-| papers        | highlights          | CASCADE   |
-| conversations | messages            | CASCADE   |
-| conversations | suggested_questions | CASCADE   |
-| conversations | conversation_papers | CASCADE   |
-| conversations | session_members     | CASCADE   |
-| conversations | session_invites     | CASCADE   |
-| highlights    | highlight_comments  | CASCADE   |
-| messages      | message_reactions   | CASCADE   |
-| messages      | messages (replies)  | SET NULL  |
+| Parent        | Child                  | On Delete |
+| ------------- | ---------------------- | --------- |
+| users         | refresh_tokens         | CASCADE   |
+| users         | papers                 | CASCADE   |
+| users         | conversations          | CASCADE   |
+| users         | highlights             | CASCADE   |
+| users         | highlight_comments     | CASCADE   |
+| users         | session_members        | CASCADE   |
+| users         | session_invites        | CASCADE   |
+| users         | message_reactions      | CASCADE   |
+| users         | notebooks              | CASCADE   |
+| users         | notebook_collaborators | CASCADE   |
+| users         | folders                | CASCADE   |
+| folders       | papers (folder_id)     | SET NULL  |
+| papers        | conversations          | CASCADE   |
+| papers        | suggested_questions    | CASCADE   |
+| papers        | related_papers         | CASCADE   |
+| papers        | highlights             | CASCADE   |
+| papers        | conversation_papers    | CASCADE   |
+| conversations | messages               | CASCADE   |
+| conversations | suggested_questions    | CASCADE   |
+| conversations | conversation_papers    | CASCADE   |
+| conversations | session_members        | CASCADE   |
+| conversations | session_invites        | CASCADE   |
+| highlights    | highlight_comments     | CASCADE   |
+| messages      | message_reactions      | CASCADE   |
+| messages      | messages (replies)     | SET NULL  |
+| notebooks     | notebook_collaborators | CASCADE   |
 
 **Lưu ý special cases**:
 
-- **Folders**: Không còn tồn tại trong schema hiện tại - papers là flat structure
+- **Folders**: Xóa folder → papers trong folder chuyển về Uncategorized (`folder_id` = NULL, SET NULL)
 - **Message replies**: Khi parent message bị xóa, `reply_to_message_id` → NULL (không xóa reply)
 - **Session members**: Khi conversation bị xóa, tất cả members và invites bị xóa
+- **Notebook collaborators**: Khi notebook bị xóa, tất cả collaborators bị xóa
+- **Notebooks**: Owner xóa → CASCADE all collaborators; Collaborator xóa → soft-hide (is_hidden = true)
 
 ---
 
@@ -688,6 +769,9 @@ PENDING → PROCESSING → COMPLETED
 10. **Invite lookup**: `session_invites_invite_token_idx`, `session_invites_expires_at_idx`
 11. **Message reactions**: `message_reactions_message_id_idx`
 12. **Message replies**: `messages_reply_to_message_id_idx`
+13. **Notebook ownership**: `notebooks_user_id_idx`
+14. **Notebook share token**: `notebooks_share_token_key` (UNIQUE)
+15. **Notebook collaborators**: `notebook_collaborators_notebook_id_idx`, `notebook_collaborators_user_id_idx`
 
 ---
 
@@ -748,7 +832,7 @@ def get_file_hash(self) -> str:
 
 These tables are **owned and managed by rag service (Pipeline_RAG)** (Python/FastAPI), NOT by the NestJS backend.
 
-### 12. `rag_paper_cache` - RAG Processing Cache
+### 17. `rag_paper_cache` - RAG Processing Cache
 
 **Mục đích**: Lưu hash của PDF để detect khi file thay đổi và cần re-ingest vector store.
 
@@ -769,7 +853,7 @@ These tables are **owned and managed by rag service (Pipeline_RAG)** (Python/Fas
 4. Save new hash after successful ingestion
 ```
 
-### 13. `paper_content_summaries` - LLM Summary Cache
+### 18. `paper_content_summaries` - LLM Summary Cache
 
 **Mục đích**: Cache các LLM-generated summaries cho tables và images để tránh gọi API nhiều lần.
 
