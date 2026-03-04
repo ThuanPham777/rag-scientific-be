@@ -18,6 +18,13 @@ export class PaperItemDto {
   id: string;
 
   @ApiProperty({
+    description: 'ID của user sở hữu paper này',
+    example: 'u1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    format: 'uuid',
+  })
+  userId: string;
+
+  @ApiProperty({
     description:
       '⚠️ CRITICAL: RAG file_id - dùng để query rag service (Pipeline_RAG). Maps to file_id trong tất cả RAG API calls (/query, /brainstorm, /status)',
     example: '8fc4b997-0165-41c4-8e5c-f2effa478855',

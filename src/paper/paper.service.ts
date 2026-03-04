@@ -29,6 +29,7 @@ export class PaperService {
   private mapToPaperItem(p: any): PaperItemDto {
     const dto = new PaperItemDto();
     dto.id = p.id;
+    dto.userId = p.userId;
     dto.ragFileId = p.ragFileId;
     dto.fileName = p.fileName;
     dto.fileUrl = p.fileUrl;
