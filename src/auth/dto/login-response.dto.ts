@@ -87,7 +87,7 @@ export class LoginResultDto {
  * Login response DTO (for Swagger documentation)
  *
  * @description Response trả về khi đăng nhập/đăng ký thành công.
- * Bao gồm user info và JWT tokens để authenticate các request tiếp theo.
+ * Bao gồm user info và JWT access token. Refresh token is set as HTTP-only cookie (not in JSON body).
  */
 export class LoginResponseDto extends ApiResponseDto<UserDto> {
   @ApiProperty({
@@ -98,19 +98,12 @@ export class LoginResponseDto extends ApiResponseDto<UserDto> {
   })
   accessToken: string;
 
-  @ApiProperty({
-    description:
-      'JWT Refresh Token - gọi `/auth/refresh` khi access token hết hạn để lấy token mới',
-    example:
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWlkIiwiZXhwIjoxNzA...',
-  })
-  refreshToken: string;
-
   @ApiProperty({ type: UserDto, description: 'Thông tin user đã đăng nhập' })
   declare data: UserDto;
 
   /**
    * Create login response from raw result
+   * Note: refreshToken is NOT included in JSON response — it's set as HTTP-only cookie by the controller.
    */
   static fromResult(result: LoginResultDto, message: string): LoginResponseDto {
     const response = new LoginResponseDto();
@@ -118,7 +111,6 @@ export class LoginResponseDto extends ApiResponseDto<UserDto> {
     response.message = message;
     response.data = result.user;
     response.accessToken = result.accessToken;
-    response.refreshToken = result.refreshToken;
     return response;
   }
 }

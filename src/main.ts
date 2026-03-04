@@ -2,11 +2,17 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { json, urlencoded } from 'express';
+import * as cookieParser from 'cookie-parser';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const cookieParserMiddleware = (cookieParser as any).default || cookieParser;
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
+
+  // Parse cookies (needed for HTTP-only refresh token cookie)
+  app.use(cookieParserMiddleware());
 
   // Increase body size limit for large payloads (e.g., base64 images)
   app.use(json({ limit: '50mb' }));
