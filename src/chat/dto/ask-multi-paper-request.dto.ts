@@ -15,15 +15,16 @@ import { ChatCitationDto } from './ask-question-response.dto';
  * Request DTO for multi-paper chat
  */
 export class AskMultiPaperRequestDto {
-  @ApiProperty({
-    description: 'List of paper IDs to query across',
+  @ApiPropertyOptional({
+    description: 'List of paper IDs to query across. Required if no conversationId is provided.',
     example: ['uuid-1', 'uuid-2'],
   })
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(10)
   @IsUUID('4', { each: true })
-  paperIds: string[];
+  paperIds?: string[];
 
   @ApiProperty({
     description: 'User question',

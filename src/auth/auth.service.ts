@@ -127,7 +127,7 @@ export class AuthService {
    * @returns Object containing accessToken and refreshToken
    */
   private async buildTokens(
-    user: { id: string; email: string; provider: string },
+    user: { id: string; email: string; provider: string; role?: string },
     deviceInfo?: string,
     ipAddress?: string,
   ) {
@@ -135,6 +135,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       provider: user.provider,
+      role: user.role,
     };
 
     const accessToken = this.issueAccessToken(payload);
@@ -211,6 +212,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Check if account is active
+    if (!user.isActive) {
+      throw new UnauthorizedException('Your account has been deactivated. Please contact an administrator.');
+    }
+
     // Update last login
     await this.usersService.updateLastLogin(user.id);
 
@@ -223,6 +229,7 @@ export class AuthService {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
         provider: user.provider,
+        role: user.role,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -291,6 +298,7 @@ export class AuthService {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
         provider: user.provider,
+        role: user.role,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -460,6 +468,7 @@ export class AuthService {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
         provider: user.provider,
+        role: user.role,
       },
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

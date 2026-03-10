@@ -112,6 +112,10 @@ JWT_REFRESH_EXPIRES_IN="7d"
 GOOGLE_CLIENT_ID="your-google-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
+# Admin Bootstrap (Optional - Creates SUPERADMIN on startup)
+ADMIN_USER="admin@domain.com"
+ADMIN_PASSWORD="StrongPassword123"
+
 # RAG Service (Python FastAPI)
 RAG_SERVICE_URL="http://localhost:8000"
 
@@ -211,6 +215,14 @@ npx prisma migrate dev --name ten_migration
 
 # 3. Prisma Client tự động regenerate
 ```
+
+**Lưu ý khi pull code mới (Data conflicts):**
+Nếu pull code về và có conflicts migration hoặc schema mismatch, bạn nên chạy:
+```bash
+npx prisma db push
+npm run prisma:generate
+```
+Để đồng bộ schema mới nhất bỏ qua migration history tạm thời.
 
 ### 5. Run Development Server
 
@@ -413,6 +425,8 @@ rag-scientific-be/
 | `GET`    | `/conversations`                                            | Danh sách conversations        | ✅   |
 | `GET`    | `/conversations/:id`                                        | Chi tiết conversation          | ✅   |
 | `DELETE` | `/conversations/:id`                                        | Xóa conversation               | ✅   |
+| `POST`   | `/conversations/:id/papers`                                 | Thêm paper vào conversation    | ✅   |
+| `DELETE` | `/conversations/:id/papers/:paperId`                        | Xóa paper khỏi conversation    | ✅   |
 | `POST`   | `/conversations/:id/suggested-questions`                    | Generate suggested questions   | ✅   |
 | `GET`    | `/conversations/:id/suggested-questions`                    | Lấy cached suggested questions | ✅   |
 | `GET`    | `/conversations/:id/messages/:messageId/followup-questions` | Get followup questions         | ✅   |

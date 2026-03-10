@@ -46,6 +46,14 @@ export class UserDto {
     enumName: 'AuthProvider',
   })
   provider: string;
+
+  @ApiProperty({
+    description: 'User role - USER (regular) or SUPERADMIN (system administrator)',
+    example: 'USER',
+    enum: ['USER', 'SUPERADMIN'],
+    enumName: 'UserRole',
+  })
+  role?: string;
 }
 
 // Alias for backward compatibility

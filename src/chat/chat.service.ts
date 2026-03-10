@@ -30,7 +30,7 @@ export class ChatService {
     private readonly s3Service: S3Service,
     private readonly sessionService: SessionService,
     private readonly sessionGateway: SessionGateway,
-  ) {}
+  ) { }
 
   private mapCitation(
     raw: any,
@@ -210,6 +210,13 @@ export class ChatService {
       );
     }
 
+    // Check if conversation is closed
+    if ((conversation as any).isClosed) {
+      throw new BadRequestException(
+        'This conversation has been closed and no longer accepts messages.',
+      );
+    }
+
     if (!conversation.paper.ragFileId) {
       throw new NotFoundException('Paper has not been processed by RAG system');
     }
@@ -221,7 +228,7 @@ export class ChatService {
       if (!hasAssistantMention) {
         throw new BadRequestException(
           'In group chat, prefix your message with @Assistant to get an AI response. ' +
-            'For plain messages, use the send-message endpoint.',
+          'For plain messages, use the send-message endpoint.',
         );
       }
     }
@@ -238,7 +245,10 @@ export class ChatService {
       },
     });
 
-    // 3b. Broadcast user message IMMEDIATELY so all session members see it
+    // 3a. Fire-and-forget auto-title on first user message
+    this.autoGenerateTitleIfNeeded(userId, conversationId).catch(() => {});
+
+
     //     before the (potentially slow) RAG call begins.
     if (conversation.isCollaborative) {
       const senderUser = await this.prisma.user.findUnique({
@@ -774,22 +784,73 @@ export class ChatService {
   async askMultiPaper(
     userId: string,
     dto: {
-      paperIds: string[];
+      paperIds?: string[];
       question: string;
       conversationId?: string;
     },
   ): Promise<AskMultiPaperResultDto> {
     const { paperIds, question, conversationId } = dto;
 
-    // 1. Verify all papers belong to user and have ragFileId
+    let actualConversationId = conversationId;
+    let activePaperIds = paperIds || [];
+
+    if (actualConversationId) {
+      // Verify ownership and get conversation papers
+      const existingConv = await this.prisma.conversation.findFirst({
+        where: {
+          id: actualConversationId,
+          userId,
+          type: ConversationType.MULTI_PAPER,
+        },
+        include: { conversationPapers: true }
+      });
+
+      if (!existingConv) {
+        throw new ForbiddenException(
+          'Conversation not found or not owned by user',
+        );
+      }
+
+      if (existingConv.conversationPapers.length > 0) {
+        activePaperIds = existingConv.conversationPapers.map((cp: any) => cp.paperId);
+      }
+    } else {
+      if (!paperIds || paperIds.length === 0) {
+        throw new BadRequestException('paperIds is required to start a new multi-paper conversation');
+      }
+
+      // Try to find an existing empty or inactive multi-paper conversation... wait, no. 
+      // User requested tabs persist, we shouldn't reuse an arbitrary conversation.
+      // We create a new one.
+      const conv = await this.prisma.conversation.create({
+        data: {
+          user: { connect: { id: userId } },
+          type: ConversationType.MULTI_PAPER,
+          title: 'Multi-paper chat',
+          conversationPapers: {
+            create: paperIds.map((pid, idx) => ({
+              paperId: pid,
+              tabOrder: idx,
+            }))
+          }
+        },
+      });
+      actualConversationId = conv.id;
+    }
+
+    if (activePaperIds.length === 0) {
+      throw new BadRequestException('No papers found in this conversation');
+    }
+
+    // 1. Verify all active papers belong to user and have ragFileId
     const papers = await this.prisma.paper.findMany({
       where: {
-        id: { in: paperIds },
+        id: { in: activePaperIds },
         userId,
       },
     });
 
-    if (papers.length !== paperIds.length) {
+    if (papers.length !== activePaperIds.length) {
       throw new ForbiddenException(
         'Some papers not found or not owned by user',
       );
@@ -797,9 +858,7 @@ export class ChatService {
 
     const fileIds: string[] = [];
     const paperTitles: Record<string, string> = {};
-    // Map ragFileId -> paperId for citation mapping
     const ragFileIdToPaperId = new Map<string, string>();
-    // Map paperId -> paper info for citation enrichment
     const paperInfoMap = new Map<
       string,
       { fileName: string; fileUrl: string | null; ragFileId: string }
@@ -819,50 +878,6 @@ export class ChatService {
         fileUrl: paper.fileUrl,
         ragFileId: paper.ragFileId,
       });
-    }
-
-    // 2. Handle conversation - ONE persistent multi-paper conversation per user
-    let actualConversationId = conversationId;
-
-    if (actualConversationId) {
-      // Verify ownership when conversationId is provided
-      const existingConv = await this.prisma.conversation.findFirst({
-        where: {
-          id: actualConversationId,
-          userId,
-          type: ConversationType.MULTI_PAPER,
-        },
-      });
-
-      if (!existingConv) {
-        throw new ForbiddenException(
-          'Conversation not found or not owned by user',
-        );
-      }
-    } else {
-      // Try to find existing multi-paper conversation for this user
-      const existingConv = await this.prisma.conversation.findFirst({
-        where: {
-          userId,
-          type: ConversationType.MULTI_PAPER,
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-
-      if (existingConv) {
-        actualConversationId = existingConv.id;
-      } else {
-        // Create a new multi-paper conversation (first time for this user)
-        // paperId is null for multi-paper conversations
-        const conv = await this.prisma.conversation.create({
-          data: {
-            user: { connect: { id: userId } },
-            type: ConversationType.MULTI_PAPER,
-            title: 'Multi-paper chat',
-          },
-        });
-        actualConversationId = conv.id;
-      }
     }
 
     // 3. Update conversation timestamp
@@ -1406,7 +1421,7 @@ export class ChatService {
     if (!isOwnMessage && !(isOwner && isAssistantMessage)) {
       throw new ForbiddenException(
         'You can only delete your own messages' +
-          (isOwner ? ' or assistant messages' : ''),
+        (isOwner ? ' or assistant messages' : ''),
       );
     }
 
@@ -1435,5 +1450,66 @@ export class ChatService {
       messageId,
       conversationId,
     };
+  }
+
+  // ============================================================
+  // Private Helpers
+  // ============================================================
+
+  /**
+   * Auto-generate a title for a conversation based on the first user message.
+   * Only triggers when the conversation title is still the default value.
+   * Fire-and-forget — never throws.
+   */
+  private async autoGenerateTitleIfNeeded(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    try {
+      const conv = await this.prisma.conversation.findFirst({
+        where: { id: conversationId, userId },
+        include: {
+          paper: { select: { title: true } },
+          conversationPapers: {
+            include: { paper: { select: { title: true } } },
+            take: 1,
+          },
+          messages: {
+            where: { role: MessageRole.USER },
+            orderBy: { createdAt: 'asc' },
+            take: 2, // fetch 2 to check if this is truly the first
+            select: { content: true },
+          },
+        },
+      });
+
+      if (!conv) return;
+
+      // Only run on first user message
+      if ((conv as any).messages?.length !== 1) return;
+
+      // Only run when title is still default
+      const defaultTitles = ['New conversation', null, ''];
+      if (!defaultTitles.includes(conv.title ?? '')) return;
+
+      const firstMsg = (conv as any).messages[0]?.content || '';
+      if (!firstMsg) return;
+
+      const paperTitle =
+        (conv as any).paper?.title ||
+        (conv as any).conversationPapers?.[0]?.paper?.title ||
+        '';
+
+      const generated = await this.ragService.generateTitle(paperTitle, firstMsg);
+
+      await this.prisma.conversation.update({
+        where: { id: conversationId },
+        data: { title: generated },
+      });
+
+      this.logger.log(`Auto-title set for ${conversationId}: "${generated}"`);
+    } catch (err) {
+      this.logger.warn(`Auto-title skipped for ${conversationId}: ${err?.message}`);
+    }
   }
 }

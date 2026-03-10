@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async findByEmail(email: string) {
     return this.prisma.user.findUnique({ where: { email } });
@@ -147,4 +147,45 @@ export class UsersService {
       },
     });
   }
+
+  /**
+   * Get aggregate stats for the profile dashboard
+   */
+  async getProfileStats(userId: string) {
+    const safeCount = async (query: Promise<number>): Promise<number> => {
+      try {
+        return await query;
+      } catch (e) {
+        console.error('[getProfileStats] query failed:', (e as Error).message);
+        return 0;
+      }
+    };
+
+    const safeUser = async () => {
+      try {
+        return await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { createdAt: true },
+        });
+      } catch {
+        return null;
+      }
+    };
+
+    const [papersCount, conversationsCount, sessionsCount, user] =
+      await Promise.all([
+        safeCount(this.prisma.paper.count({ where: { userId } })),
+        safeCount(this.prisma.conversation.count({ where: { userId } })),
+        safeCount(this.prisma.sessionMember.count({ where: { userId } })),
+        safeUser(),
+      ]);
+
+    return {
+      papersUploaded: papersCount,
+      conversations: conversationsCount,
+      collaborativeSessions: sessionsCount,
+      memberSince: user?.createdAt ?? null,
+    };
+  }
+
 }

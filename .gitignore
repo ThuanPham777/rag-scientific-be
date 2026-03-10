@@ -1,6 +1,5 @@
 # compiled output
 /dist
-/prisma/dist
 /node_modules
 /build
 
@@ -15,6 +14,7 @@ lerna-debug.log*
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Tests
 /coverage
@@ -36,8 +36,10 @@ lerna-debug.log*
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# dotenv environment variable files
+# dotenv environment variable files - NEVER commit secrets!
 .env
+.env.*
+!.env.example
 .env.development.local
 .env.test.local
 .env.production.local
@@ -56,5 +58,9 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-/generated/prisma
+# Prisma generated client
+generated/
+
+# Temp/scratch scripts
+tmp_migrate_hidden.cjs
 

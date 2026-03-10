@@ -124,6 +124,9 @@ export class PaperService {
           processedAt: new Date(),
         },
       });
+
+      // Auto-generate and cache a short summary after ingestion (fire-and-forget)
+      this.autoGenerateSummary(paperId, ragFileId);
     } catch (error) {
       this.logger.error('RAG ingestion failed:', error);
       await this.prisma.paper.update({
@@ -372,6 +375,27 @@ export class PaperService {
       this.logger.error(`RAG cleanup failed for: ${ragFileId}`, error);
     }
   }
+
+  /**
+   * Auto-generate and persist a summary for a paper after ingestion.
+   * Called fire-and-forget from triggerRagIngestion. Failures are swallowed.
+   */
+  private async autoGenerateSummary(paperId: string, ragFileId: string): Promise<void> {
+    try {
+      const response = await this.ragService.summarizePaper(ragFileId);
+      if (response?.summary) {
+        await this.prisma.paper.update({
+          where: { id: paperId },
+          data: { summary: response.summary },
+        });
+        this.logger.log(`Auto-summary saved for paper: ${paperId}`);
+      }
+    } catch (error) {
+      // Non-fatal: summary can still be generated on demand later
+      this.logger.warn(`Auto-summary failed for paper ${paperId}: ${error?.message ?? error}`);
+    }
+  }
+
 
   /**
    * Delete ALL papers owned by the user and cleanup associated resources.

@@ -124,6 +124,44 @@ export class RagService {
   }
 
   /**
+   * Generate a concise chat session title.
+   * Uses the /generate endpoint with a structured prompt.
+   * Returns a fallback title if the call fails.
+   *
+   * @param paperTitle - Title of the primary paper (or empty string)
+   * @param firstMessage - First user message text
+   */
+  async generateTitle(
+    paperTitle: string,
+    firstMessage: string,
+  ): Promise<string> {
+    const truncatedMsg = firstMessage.substring(0, 200);
+    const prompt = [
+      'Generate a concise chat session title (max 60 characters, no quotes) based on:',
+      paperTitle ? `Paper: "${paperTitle}"` : '',
+      `User message: "${truncatedMsg}"`,
+      'Return only the title text, nothing else.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const response = await this.http.axiosRef.post<{ answer: string }>(
+        `${this.ragUrl}/generate`,
+        { prompt },
+        { timeout: 10000 },
+      );
+      const raw = (response.data.answer || '').trim().replace(/^["']|["']$/g, '');
+      return raw.substring(0, 60) || 'New conversation';
+    } catch (err) {
+      this.logger.warn(`Auto-title generation failed: ${err?.message}`);
+      return paperTitle
+        ? `Chat about ${paperTitle.substring(0, 40)}`
+        : 'New conversation';
+    }
+  }
+
+  /**
    * Explain a selected region in a PDF using image
    * @param fileId - RAG file ID of the paper
    * @param question - Question about the region

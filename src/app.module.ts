@@ -15,6 +15,8 @@ import { RagModule } from './rag/rag.module';
 import { SessionModule } from './session/session.module';
 import { NotebookModule } from './notebook/notebook.module';
 import { FolderModule } from './folder/folder.module';
+import { AdminModule } from './admin/admin.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { FolderModule } from './folder/folder.module';
     SessionModule,
     NotebookModule,
     FolderModule,
+    AdminModule,
+    SearchModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }

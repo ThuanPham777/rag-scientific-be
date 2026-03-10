@@ -79,6 +79,11 @@ enum AuthProvider {
   GOOGLE  // Google OAuth
 }
 
+enum UserRole {
+  USER        // Regular authenticated user
+  SUPERADMIN  // System administrator
+}
+
 /// User account - supports both local and OAuth authentication
 model User {
   id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -98,6 +103,9 @@ model User {
   // === Password Reset ===
   passwordResetToken     String?   @map("password_reset_token") @db.VarChar(255)
   passwordResetExpiresAt DateTime? @map("password_reset_expires_at") @db.Timestamptz
+
+  // === Role ===
+  role          UserRole     @default(USER)
 
   // === Status ===
   isActive      Boolean      @default(true) @map("is_active")
@@ -123,6 +131,8 @@ model User {
 
   @@unique([provider, providerId])
   @@index([email])
+  @@index([role])
+  @@index([isActive])
   @@map("users")
 }
 
@@ -232,6 +242,7 @@ model Paper {
   conversations      Conversation[]
   relatedPapers      RelatedPaper[]
   highlights         Highlight[]
+  conversationPapers ConversationPaper[]
 
   @@index([userId])
   @@index([folderId])
@@ -271,6 +282,9 @@ model Conversation {
   sessionCode    String?         @unique @map("session_code") @db.VarChar(20)
   maxMembers     Int             @default(10) @map("max_members")
 
+  // === Chat History ===
+  isClosed       Boolean         @default(false) @map("is_closed")
+
   createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -281,6 +295,7 @@ model Conversation {
   suggestedQuestions SuggestedQuestion[]
   sessionMembers     SessionMember[]
   sessionInvites     SessionInvite[]
+  conversationPapers ConversationPaper[]
 
   @@index([userId])
   @@index([paperId])
@@ -288,6 +303,27 @@ model Conversation {
   @@index([type])
   @@index([isCollaborative])
   @@map("conversations")
+}
+
+/// Join table for Multi-Paper Conversations
+model ConversationPaper {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String       @map("conversation_id") @db.Uuid
+  paperId         String       @map("paper_id") @db.Uuid
+  
+  // Custom ordering for tabs
+  tabOrder        Int          @default(0) @map("tab_order")
+  
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  paper           Paper        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, paperId])
+  @@index([conversationId])
+  @@index([paperId])
+  @@map("conversation_papers")
 }
 
 enum MessageRole {

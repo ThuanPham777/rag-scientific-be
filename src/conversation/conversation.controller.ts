@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -34,13 +35,18 @@ import {
   ApiResponseDto,
   EmptyResponseDto,
 } from '../common/dto/api-response.dto';
+import {
+  ConversationHistoryResponseDto,
+  UpdateConversationDto,
+  CloseConversationResponseDto,
+} from './dto/conversation-history.dto';
 
 @ApiTags('Conversations')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationController {
-  constructor(private readonly conversationService: ConversationService) {}
+  constructor(private readonly conversationService: ConversationService) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a new conversation for a paper' })
@@ -57,6 +63,19 @@ export class ConversationController {
       data,
       'Conversation created',
     ) as CreateConversationResponseDto;
+  }
+
+  @Get('history')
+  @ApiOperation({ summary: 'Get full chat history with stats for the user' })
+  @ApiOkResponse({ type: ConversationHistoryResponseDto })
+  async getHistory(
+    @CurrentUser() user: any,
+  ): Promise<ConversationHistoryResponseDto> {
+    const data = await this.conversationService.getConversationHistory(user.id);
+    return ApiResponseDto.success(
+      data,
+      'Conversation history',
+    ) as ConversationHistoryResponseDto;
   }
 
   @Get()
@@ -119,6 +138,71 @@ export class ConversationController {
     return EmptyResponseDto.success(
       'Conversation deleted successfully',
     ) as DeleteConversationResponseDto;
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Rename a conversation' })
+  @ApiParam({ name: 'id', description: 'Conversation ID' })
+  @ApiOkResponse({ type: CreateConversationResponseDto })
+  async update(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateConversationDto,
+  ): Promise<CreateConversationResponseDto> {
+    const data = await this.conversationService.updateConversationTitle(
+      user.id,
+      id,
+      dto.title || '',
+    );
+    return ApiResponseDto.success(
+      data,
+      'Conversation updated',
+    ) as CreateConversationResponseDto;
+  }
+
+  @Patch(':id/close')
+  @ApiOperation({ summary: 'Close a conversation (no further chat allowed)' })
+  @ApiParam({ name: 'id', description: 'Conversation ID' })
+  @ApiOkResponse({ type: CloseConversationResponseDto })
+  async close(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ): Promise<CloseConversationResponseDto> {
+    await this.conversationService.closeConversation(user.id, id);
+    return EmptyResponseDto.success(
+      'Conversation closed',
+    ) as CloseConversationResponseDto;
+  }
+
+  // ============================================================
+  // Session Papers Management (MULTI_PAPER)
+  // ============================================================
+
+  @Post(':id/papers')
+  @ApiOperation({ summary: 'Add a paper to a multi-paper conversation' })
+  @ApiParam({ name: 'id', description: 'Conversation ID' })
+  @ApiOkResponse({ description: 'Paper added to conversation' })
+  async addPaper(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('paperId') paperId: string,
+  ): Promise<ApiResponseDto<null>> {
+    await this.conversationService.addPaperToConversation(user.id, id, paperId);
+    return EmptyResponseDto.success('Paper added to conversation') as any;
+  }
+
+  @Delete(':id/papers/:paperId')
+  @ApiOperation({ summary: 'Remove a paper from a multi-paper conversation' })
+  @ApiParam({ name: 'id', description: 'Conversation ID' })
+  @ApiParam({ name: 'paperId', description: 'Paper ID to remove' })
+  @ApiOkResponse({ description: 'Paper removed from conversation' })
+  async removePaper(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('paperId') paperId: string,
+  ): Promise<ApiResponseDto<null>> {
+    await this.conversationService.removePaperFromConversation(user.id, id, paperId);
+    return EmptyResponseDto.success('Paper removed from conversation') as any;
   }
 
   // ============================================================
