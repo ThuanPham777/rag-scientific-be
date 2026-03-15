@@ -65,9 +65,18 @@ export class RagService {
    * Query a single paper
    * @param fileId - RAG file ID of the paper
    * @param question - User's question
+   * @param options - Optional chat_history, summary, and custom_prompts for conversation memory
    * @returns Query response with answer and context
    */
-  async query(fileId: string, question: string): Promise<RagQueryResponse> {
+  async query(
+    fileId: string,
+    question: string,
+    options?: {
+      chat_history?: { role: string; content: string }[];
+      summary?: string;
+      custom_prompts?: Record<string, string>;
+    },
+  ): Promise<RagQueryResponse> {
     this.logger.debug(`Querying file: ${fileId} with question: ${question}`);
 
     const response = await this.http.axiosRef.post<RagQueryResponse>(
@@ -75,6 +84,9 @@ export class RagService {
       {
         file_id: fileId,
         question,
+        chat_history: options?.chat_history || [],
+        summary: options?.summary || '',
+        custom_prompts: options?.custom_prompts || null,
       },
     );
 
@@ -82,14 +94,16 @@ export class RagService {
   }
 
   /**
-   * Query multiple papers at once
+   * Query multiple papers at once with smart query decomposition.
    * @param fileIds - Array of RAG file IDs
    * @param question - User's question
+   * @param paperSummaries - Optional map of fileId -> summary text for cross-paper analysis
    * @returns Query response with answer, context, and sources
    */
   async queryMulti(
     fileIds: string[],
     question: string,
+    paperSummaries?: Record<string, string>,
   ): Promise<RagQueryResponse> {
     this.logger.debug(
       `Querying multi files: ${fileIds.join(', ')} with question: ${question}`,
@@ -100,6 +114,7 @@ export class RagService {
       {
         file_ids: fileIds,
         question,
+        paper_summaries: paperSummaries || null,
       },
     );
 
@@ -336,6 +351,30 @@ export class RagService {
     );
 
     return response.data;
+  }
+
+  /**
+   * Summarize overflow messages for rolling conversation memory
+   * @param oldSummary - Previous rolling summary (may be empty)
+   * @param overflowMessages - Messages that fell out of the sliding window
+   * @returns Updated summary string
+   */
+  async summarizeMemory(
+    oldSummary: string,
+    overflowMessages: { role: string; content: string }[],
+  ): Promise<string> {
+    this.logger.debug(`Summarizing memory: ${overflowMessages.length} overflow messages`);
+
+    const response = await this.http.axiosRef.post<{ summary: string }>(
+      `${this.ragUrl}/summarize-memory`,
+      {
+        old_summary: oldSummary,
+        messages: overflowMessages,
+      },
+      { timeout: 15000 },
+    );
+
+    return response.data.summary;
   }
 
   // ============================================================

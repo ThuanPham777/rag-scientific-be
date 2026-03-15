@@ -40,6 +40,7 @@ export interface ConversationDetail extends ConversationItemDto {
     title?: string;
     fileName: string;
     fileUrl: string;
+    status?: string;
     orderIndex: number;
     tabOrder?: number;
   }>;
@@ -470,6 +471,7 @@ export class ConversationService {
           title: true,
           fileUrl: true,
           fileName: true,
+          status: true,
         },
       },
       conversationPapers: {
@@ -482,6 +484,7 @@ export class ConversationService {
               title: true,
               fileUrl: true,
               fileName: true,
+              status: true,
             },
           },
         },
@@ -534,6 +537,7 @@ export class ConversationService {
         title: cp.paper.title,
         fileName: cp.paper.fileName,
         fileUrl: cp.paper.fileUrl,
+        status: cp.paper.status || 'COMPLETED',
         orderIndex: cp.tabOrder,
         tabOrder: cp.tabOrder,
       }));
@@ -545,6 +549,7 @@ export class ConversationService {
           title: conv.paper.title,
           fileName: conv.paper.fileName,
           fileUrl: conv.paper.fileUrl,
+          status: (conv.paper as any).status || 'COMPLETED',
           orderIndex: 0,
         },
       ];

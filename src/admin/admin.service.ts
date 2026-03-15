@@ -191,7 +191,7 @@ export class AdminService {
     async getUserPapers(userId: string, page: number = 1, limit: number = 20) {
         const skip = (page - 1) * limit;
 
-        const [papers, total] = await Promise.all([
+        const [rawPapers, total] = await Promise.all([
             this.prisma.paper.findMany({
                 where: { userId },
                 skip,
@@ -204,12 +204,20 @@ export class AdminService {
                     status: true,
                     fileSize: true,
                     numPages: true,
+                    isSystemKb: true,
+                    summary: true,
                     createdAt: true,
                     processedAt: true,
                 },
             }),
             this.prisma.paper.count({ where: { userId } }),
         ]);
+
+        // Convert BigInt fileSize to Number for JSON serialization
+        const papers = rawPapers.map((p) => ({
+            ...p,
+            fileSize: p.fileSize ? Number(p.fileSize) : null,
+        }));
 
         return {
             papers,

@@ -246,7 +246,7 @@ export class ChatService {
     });
 
     // 3a. Fire-and-forget auto-title on first user message
-    this.autoGenerateTitleIfNeeded(userId, conversationId).catch(() => {});
+    this.autoGenerateTitleIfNeeded(userId, conversationId).catch(() => { });
 
 
     //     before the (potentially slow) RAG call begins.
@@ -274,12 +274,51 @@ export class ChatService {
     // 4. Strip @Assistant prefix for RAG query (keep original in stored message)
     const ragQuestion = question.replace(/^@Assistant\s*/i, '').trim();
 
-    // 5. Call RAG service via centralized RagService
+    // 4a. Load recent chat history + rolling summary for conversation memory
+    const HISTORY_LIMIT = 10; // sliding window size
+    const recentMessages = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: HISTORY_LIMIT,
+      select: { role: true, content: true, createdAt: true },
+    });
+
+    // Get most recent messages (take returns oldest first due to asc, we want latest)
+    const totalMsgCount = await this.prisma.message.count({
+      where: { conversationId },
+    });
+
+    // Load latest N messages (ordered chronologically)
+    const latestMessages = totalMsgCount > HISTORY_LIMIT
+      ? await this.prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'desc' },
+        take: HISTORY_LIMIT,
+        select: { role: true, content: true },
+      }).then(msgs => msgs.reverse()) // reverse to chronological order
+      : recentMessages;
+
+    const chatHistory = latestMessages.map(m => ({
+      role: m.role === 'USER' ? 'user' : 'assistant',
+      content: m.content || '',
+    }));
+
+    const memorySummary = (conversation as any).memorySummary || '';
+
+    // 4b. Load custom prompts from admin config
+    const customPrompts = await this.loadCustomPrompts();
+
+    // 5. Call RAG service with chat history + rolling summary + custom prompts
     let ragResponse;
     try {
       ragResponse = await this.ragService.query(
         conversation.paper.ragFileId,
         ragQuestion,
+        {
+          chat_history: chatHistory,
+          summary: memorySummary,
+          custom_prompts: customPrompts,
+        },
       );
     } catch (error) {
       // Create error message
@@ -329,6 +368,15 @@ export class ChatService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
+
+    // 7a. Rolling summary — update memorySummary if messages exceed window
+    // Run in background (fire-and-forget) to avoid blocking the response
+    this.updateMemorySummaryIfNeeded(
+      conversationId,
+      totalMsgCount + 2,  // +2 for the user msg + assistant msg we just created
+      HISTORY_LIMIT,
+      memorySummary,
+    ).catch(err => this.logger.warn(`[Memory] Summary update failed: ${err.message}`));
 
     // 7b. Broadcast assistant response to collaborative session
     if (conversation.isCollaborative) {
@@ -880,6 +928,17 @@ export class ChatService {
       });
     }
 
+    // 2b. Build paper summaries for cross-paper analysis
+    const paperSummaries: Record<string, string> = {};
+    for (const paper of papers) {
+      const parts: string[] = [];
+      if ((paper as any).summary) parts.push((paper as any).summary);
+      if ((paper as any).abstract) parts.push(`Abstract: ${(paper as any).abstract}`);
+      if (parts.length > 0 && paper.ragFileId) {
+        paperSummaries[paper.ragFileId] = parts.join('\n\n');
+      }
+    }
+
     // 3. Update conversation timestamp
     await this.prisma.conversation.update({
       where: { id: actualConversationId },
@@ -897,10 +956,14 @@ export class ChatService {
       },
     });
 
-    // 5. Call RAG service with multi-query endpoint via centralized RagService
+    // 5. Call RAG service with multi-query endpoint + paper summaries
     let ragResponse;
     try {
-      ragResponse = await this.ragService.queryMulti(fileIds, question);
+      ragResponse = await this.ragService.queryMulti(
+        fileIds,
+        question,
+        Object.keys(paperSummaries).length > 0 ? paperSummaries : undefined,
+      );
     } catch (error) {
       await this.prisma.message.create({
         data: {
@@ -1458,6 +1521,86 @@ export class ChatService {
 
   /**
    * Auto-generate a title for a conversation based on the first user message.
+  /**
+   * Load custom prompts from admin config DB.
+   * Returns a map of prompt keys to prompt text.
+   */
+  private async loadCustomPrompts(): Promise<Record<string, string>> {
+    try {
+      const promptKeys = ['prompt.rag_instructions', 'prompt.condense_question', 'prompt.region_explain'];
+      const configs = await this.prisma.systemConfig.findMany({
+        where: { key: { in: promptKeys } },
+        select: { key: true, value: true },
+      });
+
+      const prompts: Record<string, string> = {};
+      for (const c of configs) {
+        const val = c.value as any;
+        if (val?.text) {
+          // Map 'prompt.rag_instructions' -> 'rag_instructions'
+          const shortKey = c.key.replace('prompt.', '');
+          prompts[shortKey] = val.text;
+        }
+      }
+      return prompts;
+    } catch (err) {
+      this.logger.warn(`[Prompts] Failed to load custom prompts: ${err}`);
+      return {};
+    }
+  }
+
+  /**
+   * Update rolling memory summary if conversation exceeds window size.
+   * Loads overflow messages (those pushed out of the window),
+   * calls RAG to summarize them with the old summary, and saves to DB.
+   * Fire-and-forget — never throws (errors are logged).
+   */
+  private async updateMemorySummaryIfNeeded(
+    conversationId: string,
+    totalMsgCount: number,
+    windowSize: number,
+    oldSummary: string,
+  ): Promise<void> {
+    // Only update if we have messages beyond the window
+    if (totalMsgCount <= windowSize) return;
+
+    try {
+      // Load the overflow messages (those that just fell out of the window)
+      const overflowCount = Math.min(totalMsgCount - windowSize, windowSize);
+      const overflowMessages = await this.prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        skip: Math.max(0, totalMsgCount - windowSize - overflowCount),
+        take: overflowCount,
+        select: { role: true, content: true },
+      });
+
+      if (overflowMessages.length === 0) return;
+
+      const overflowForRag = overflowMessages.map(m => ({
+        role: m.role === 'USER' ? 'user' : 'assistant',
+        content: m.content || '',
+      }));
+
+      // Call RAG to summarize
+      const newSummary = await this.ragService.summarizeMemory(
+        oldSummary,
+        overflowForRag,
+      );
+
+      if (newSummary && newSummary !== oldSummary) {
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { memorySummary: newSummary },
+        });
+        this.logger.log(`[Memory] Summary updated for conversation ${conversationId} (${newSummary.length} chars)`);
+      }
+    } catch (err) {
+      this.logger.warn(`[Memory] Failed to update summary: ${err}`);
+    }
+  }
+
+  /**
    * Only triggers when the conversation title is still the default value.
    * Fire-and-forget — never throws.
    */
