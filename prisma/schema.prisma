@@ -693,3 +693,26 @@ model KbPaperCategory {
   @@index([categoryId])
   @@map("kb_paper_categories")
 }
+
+// ============================================================================
+// SECTION 13: LLM USAGE TRACKING
+// ============================================================================
+
+/// Logs every LLM call for dashboard analytics (token counts, model usage, etc.)
+model LlmUsageLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  model          String   @db.VarChar(100)  // e.g. "gpt-4o-mini", "llama-3.3-70b-versatile"
+  provider       String   @db.VarChar(50)   // "openai", "groq", "gemini"
+  purpose        String   @db.VarChar(50)   // "generation", "hyde", "condense", "embedding", "summarization"
+  endpoint       String   @db.VarChar(50)   // "query", "query-multi", "summarize-memory", "ingest"
+  inputTokens    Int      @default(0) @map("input_tokens")
+  outputTokens   Int      @default(0) @map("output_tokens")
+  durationMs     Int?     @map("duration_ms")
+  userId         String?  @map("user_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+
+  @@index([createdAt])
+  @@index([model])
+  @@map("llm_usage_log")
+}

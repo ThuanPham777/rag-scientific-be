@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminService } from './admin.service';
+import { UsageService } from './usage/usage.service';
 
 @ApiTags('admin')
 @ApiBearerAuth('JWT-auth')
@@ -30,7 +31,10 @@ import { AdminService } from './admin.service';
 @Roles('SUPERADMIN' as any)
 @Controller('admin')
 export class AdminController {
-    constructor(private readonly adminService: AdminService) { }
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly usageService: UsageService,
+    ) { }
 
     // ============================================================
     // DASHBOARD STATS
@@ -57,6 +61,20 @@ export class AdminController {
         const data = await this.adminService.getRecentUsers(
             limit ? parseInt(limit, 10) : 10,
         );
+        return { success: true, data };
+    }
+
+    @Get('usage-stats')
+    @ApiOperation({ summary: '[ADMIN] Get LLM usage statistics for dashboard' })
+    @ApiQuery({
+        name: 'days',
+        required: false,
+        description: 'Range in days (default: 7)',
+        example: 7,
+    })
+    async getUsageStats(@Query('days') days?: string) {
+        const rangeDays = days ? parseInt(days, 10) : 7;
+        const data = await this.usageService.getUsageStats(rangeDays);
         return { success: true, data };
     }
 

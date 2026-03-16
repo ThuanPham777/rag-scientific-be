@@ -5,11 +5,12 @@ import { AdminBootstrapService } from './admin-bootstrap.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SystemConfigModule } from './config/config.module';
 import { KbModule } from './kb/kb.module';
+import { UsageModule } from './usage/usage.module';
 
 @Module({
-    imports: [PrismaModule, SystemConfigModule, KbModule],
+    imports: [PrismaModule, SystemConfigModule, KbModule, UsageModule],
     controllers: [AdminController],
     providers: [AdminService, AdminBootstrapService],
-    exports: [AdminService, SystemConfigModule],
+    exports: [AdminService, SystemConfigModule, UsageModule],
 })
 export class AdminModule { }

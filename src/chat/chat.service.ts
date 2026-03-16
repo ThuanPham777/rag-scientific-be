@@ -19,6 +19,7 @@ import { MessageItemDto } from './dto/get-messages-response.dto';
 import { MessageRole, ConversationType } from '../../generated/prisma/client';
 import { SessionService } from '../session/session.service';
 import { SessionGateway } from '../session/session.gateway';
+import { UsageService } from '../admin/usage/usage.service';
 
 @Injectable()
 export class ChatService {
@@ -30,7 +31,40 @@ export class ChatService {
     private readonly s3Service: S3Service,
     private readonly sessionService: SessionService,
     private readonly sessionGateway: SessionGateway,
+    private readonly usageService: UsageService,
   ) { }
+
+  /**
+   * Log LLM usage from RAG response (fire-and-forget).
+   */
+  private logRagUsage(
+    ragResponse: any,
+    endpoint: string,
+    userId?: string,
+    conversationId?: string,
+  ): void {
+    try {
+      const usageEntries = ragResponse?.usage;
+      if (!usageEntries || !Array.isArray(usageEntries) || usageEntries.length === 0) return;
+
+      const entries = usageEntries.map((u: any) => ({
+        model: u.model || 'unknown',
+        provider: u.provider || 'unknown',
+        purpose: u.purpose || 'unknown',
+        endpoint,
+        inputTokens: u.input_tokens || 0,
+        outputTokens: u.output_tokens || 0,
+        userId: userId || null,
+        conversationId: conversationId || null,
+      }));
+
+      this.usageService.logUsage(entries).catch(err =>
+        this.logger.warn(`[Usage] Log failed: ${err.message}`),
+      );
+    } catch (err) {
+      this.logger.warn(`[Usage] Log parse error: ${err}`);
+    }
+  }
 
   private mapCitation(
     raw: any,
@@ -343,6 +377,8 @@ export class ChatService {
     }
 
     const answerText = ragResponse.answer || '';
+    // Log LLM usage (fire-and-forget)
+    this.logRagUsage(ragResponse, 'query', userId, conversationId);
     const rawCitations = this.ragService.extractCitationsFromContext(
       ragResponse.context,
     );
