@@ -567,6 +567,7 @@ export class ConversationService {
         content: m.content,
         imageUrl: m.imageUrl,
         context: m.context,
+        userId: m.userId,
         createdAt: m.createdAt,
       })),
     };
@@ -596,36 +597,53 @@ export class ConversationService {
     conversationId: string,
     paperId: string,
   ): Promise<void> {
+    // Find conversation — don't filter by userId (collab members need access)
     const conv = await this.prisma.conversation.findFirst({
       where: {
         id: conversationId,
-        userId,
-        type: { in: [ConversationType.MULTI_PAPER, ConversationType.SINGLE_PAPER] },
+        type: { in: [ConversationType.MULTI_PAPER, ConversationType.SINGLE_PAPER, ConversationType.GROUP] },
       },
-      include: { conversationPapers: { orderBy: { tabOrder: 'desc' }, take: 1 } },
+      include: {
+        conversationPapers: { orderBy: { tabOrder: 'desc' }, take: 1 },
+        sessionMembers: { where: { userId, isActive: true } },
+      },
     });
 
     if (!conv) {
-      throw new NotFoundException('Conversation not found or not owned by user');
+      throw new NotFoundException('Conversation not found');
     }
 
+    // Verify access: user is owner OR active session member
+    const isOwner = conv.userId === userId;
+    const isMember = (conv as any).sessionMembers?.length > 0;
+    if (!isOwner && !isMember) {
+      throw new ForbiddenException('You do not have access to this conversation');
+    }
+
+    // Find paper — don't filter by userId (collab papers may belong to session owner)
     const paper = await this.prisma.paper.findFirst({
-      where: { id: paperId, userId },
+      where: { id: paperId },
     });
 
     if (!paper) {
-      throw new NotFoundException('Paper not found or not owned by user');
+      throw new NotFoundException('Paper not found');
     }
 
-    if (conv.type === ConversationType.SINGLE_PAPER) {
+    if (conv.type === ConversationType.SINGLE_PAPER || conv.type === ConversationType.GROUP) {
       // First, create the join record for the original paper
-      await this.prisma.conversationPaper.create({
-        data: {
-          conversationId,
-          paperId: conv.paperId,
-          tabOrder: 0,
-        },
+      // Check if it already exists to avoid duplicates
+      const existingOriginal = await this.prisma.conversationPaper.findFirst({
+        where: { conversationId, paperId: conv.paperId },
       });
+      if (!existingOriginal) {
+        await this.prisma.conversationPaper.create({
+          data: {
+            conversationId,
+            paperId: conv.paperId,
+            tabOrder: 0,
+          },
+        });
+      }
 
       // Second, create the join record for the newly added paper
       await this.prisma.conversationPaper.create({
@@ -671,11 +689,21 @@ export class ConversationService {
     paperId: string,
   ): Promise<void> {
     const conv = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, userId, type: ConversationType.MULTI_PAPER },
+      where: { id: conversationId, type: ConversationType.MULTI_PAPER },
+      include: {
+        sessionMembers: { where: { userId, isActive: true } },
+      },
     });
 
     if (!conv) {
-      throw new NotFoundException('Conversation not found or not owned by user');
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // Verify access: user is owner OR active session member
+    const isOwner = conv.userId === userId;
+    const isMember = (conv as any).sessionMembers?.length > 0;
+    if (!isOwner && !isMember) {
+      throw new ForbiddenException('You do not have access to this conversation');
     }
 
     try {

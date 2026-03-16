@@ -1,7 +1,7 @@
 // src/session/dto/session-response.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ApiResponseDto } from '../../common/dto/api-response.dto';
-import { SessionMemberDto } from './join-session.dto';
+import { SessionMemberDto, PaperInfoDto } from './join-session.dto';
 
 export class SessionDetailDto {
   @ApiProperty() conversationId: string;
@@ -14,6 +14,7 @@ export class SessionDetailDto {
   @ApiPropertyOptional() paperTitle?: string;
   @ApiPropertyOptional() paperFileName?: string;
   @ApiPropertyOptional() paperUrl?: string;
+  @ApiPropertyOptional({ type: [PaperInfoDto] }) papers?: PaperInfoDto[];
   @ApiProperty() createdAt: Date;
 }
 
@@ -30,12 +31,12 @@ export class RemoveMemberResultDto {
 }
 
 // Wrapped API responses
-export class CreateSessionResponseDto extends ApiResponseDto<any> {}
-export class JoinSessionResponseDto extends ApiResponseDto<any> {}
-export class SessionDetailResponseDto extends ApiResponseDto<SessionDetailDto> {}
-export class CreateInviteResponseDto extends ApiResponseDto<CreateInviteResultDto> {}
+export class CreateSessionResponseDto extends ApiResponseDto<any> { }
+export class JoinSessionResponseDto extends ApiResponseDto<any> { }
+export class SessionDetailResponseDto extends ApiResponseDto<SessionDetailDto> { }
+export class CreateInviteResponseDto extends ApiResponseDto<CreateInviteResultDto> { }
 export class ListSessionsResponseDto extends ApiResponseDto<
   SessionDetailDto[]
-> {}
-export class RemoveMemberResponseDto extends ApiResponseDto<RemoveMemberResultDto> {}
-export class LeaveSessionResponseDto extends ApiResponseDto<any> {}
+> { }
+export class RemoveMemberResponseDto extends ApiResponseDto<RemoveMemberResultDto> { }
+export class LeaveSessionResponseDto extends ApiResponseDto<any> { }

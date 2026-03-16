@@ -1,11 +1,19 @@
 // src/session/dto/join-session.dto.ts
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString } from 'class-validator';
 
 export class JoinSessionDto {
   @ApiProperty({ description: 'Invite token from the invite link' })
   @IsString()
   inviteToken: string;
+}
+
+export class PaperInfoDto {
+  @ApiProperty() id: string;
+  @ApiProperty() title: string;
+  @ApiProperty() fileName: string;
+  @ApiProperty() fileUrl: string;
+  @ApiPropertyOptional() ragFileId?: string;
 }
 
 export class JoinSessionResultDto {
@@ -18,6 +26,7 @@ export class JoinSessionResultDto {
   @ApiProperty() paperUrl: string;
   @ApiProperty() paperRagFileId: string;
   @ApiProperty() members: SessionMemberDto[];
+  @ApiPropertyOptional({ type: [PaperInfoDto] }) papers?: PaperInfoDto[];
 }
 
 export class SessionMemberDto {

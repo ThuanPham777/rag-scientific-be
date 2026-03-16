@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RagService } from '../rag/index';
-import { SessionRole, MessageRole } from '../../generated/prisma/client';
+import { SessionRole, MessageRole, ConversationType } from '../../generated/prisma/client';
 import {
   CreateSessionDto,
   CreateSessionResultDto,
@@ -31,7 +31,7 @@ export class SessionService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly ragService: RagService,
-  ) {}
+  ) { }
 
   // =========================================================================
   // SESSION LIFECYCLE
@@ -57,43 +57,87 @@ export class SessionService {
       throw new ForbiddenException('Paper not found or not owned by user');
     }
 
-    // 2. Generate unique IDs
+    // 2. Detect if source conversation is MULTI_PAPER
+    let isMultiPaper = false;
+    let sourceConvPapers: any[] = [];
+    if (dto.sourceConversationId) {
+      const sourceConv = await this.prisma.conversation.findUnique({
+        where: { id: dto.sourceConversationId },
+        include: { conversationPapers: { include: { paper: true } } },
+      });
+      if (sourceConv?.type === ConversationType.MULTI_PAPER && sourceConv.conversationPapers.length > 0) {
+        isMultiPaper = true;
+        sourceConvPapers = sourceConv.conversationPapers;
+      }
+    }
+
+    // 3. Generate unique IDs
     const sessionCode = this.generateSessionCode();
     const inviteToken = this.generateInviteToken();
     const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
-    const clonedRagFileId = crypto.randomUUID();
-    const conversationTitle = `[Group] ${paper.title || paper.fileName}`;
+    const conversationType = isMultiPaper ? 'MULTI_PAPER' : 'GROUP';
 
-    // 3. Transaction: clone paper + create GROUP conversation + owner membership + invite
+    // 4. Transaction: clone paper(s) + create conversation + owner membership + invite
     const result = await this.prisma.$transaction(async (tx) => {
-      // Clone the paper (same fileUrl, new ragFileId)
-      // IMPORTANT: folderId must be null — group papers are tied to
-      // conversations, NOT folders. Folders are a private UI layer.
-      const clonedPaper = await tx.paper.create({
-        data: {
-          userId,
-          folderId: null, // Group paper must NOT belong to any folder
-          fileName: paper.fileName,
-          fileUrl: paper.fileUrl,
-          fileSize: paper.fileSize,
-          fileHash: paper.fileHash,
-          ragFileId: clonedRagFileId,
-          title: paper.title,
-          abstract: paper.abstract,
-          authors: paper.authors,
-          summary: paper.summary,
-          numPages: paper.numPages,
-          status: 'PENDING', // Will be processed by RAG
-        },
-      });
+      let clonedPapers: any[] = [];
 
-      // Create GROUP conversation
+      if (isMultiPaper) {
+        // Clone ALL papers from the source conversation
+        for (const cp of sourceConvPapers) {
+          const srcPaper = cp.paper;
+          const clonedRagFileId = crypto.randomUUID();
+          const cloned = await tx.paper.create({
+            data: {
+              userId,
+              folderId: null,
+              fileName: srcPaper.fileName,
+              fileUrl: srcPaper.fileUrl,
+              fileSize: srcPaper.fileSize,
+              fileHash: srcPaper.fileHash,
+              ragFileId: clonedRagFileId,
+              title: srcPaper.title,
+              abstract: srcPaper.abstract,
+              authors: srcPaper.authors,
+              summary: srcPaper.summary,
+              numPages: srcPaper.numPages,
+              status: 'PENDING',
+            },
+          });
+          clonedPapers.push({ cloned, original: srcPaper, tabOrder: cp.tabOrder });
+        }
+      } else {
+        // Single paper clone (legacy behavior)
+        const clonedRagFileId = crypto.randomUUID();
+        const cloned = await tx.paper.create({
+          data: {
+            userId,
+            folderId: null,
+            fileName: paper.fileName,
+            fileUrl: paper.fileUrl,
+            fileSize: paper.fileSize,
+            fileHash: paper.fileHash,
+            ragFileId: clonedRagFileId,
+            title: paper.title,
+            abstract: paper.abstract,
+            authors: paper.authors,
+            summary: paper.summary,
+            numPages: paper.numPages,
+            status: 'PENDING',
+          },
+        });
+        clonedPapers.push({ cloned, original: paper, tabOrder: 0 });
+      }
+
+      const primaryPaper = clonedPapers[0].cloned;
+      const conversationTitle = `[Group] ${primaryPaper.title || primaryPaper.fileName}`;
+
+      // Create conversation with correct type
       const conversation = await tx.conversation.create({
         data: {
           userId,
-          paperId: clonedPaper.id,
+          paperId: primaryPaper.id,
           title: conversationTitle,
-          type: 'GROUP',
+          type: conversationType,
           isCollaborative: true,
           sessionCode,
           maxMembers: dto.maxMembers || 10,
@@ -113,6 +157,19 @@ export class SessionService {
           },
         },
       });
+
+      // Create ConversationPaper records for multi-paper
+      if (isMultiPaper) {
+        for (const cp of clonedPapers) {
+          await tx.conversationPaper.create({
+            data: {
+              conversationId: conversation.id,
+              paperId: cp.cloned.id,
+              tabOrder: cp.tabOrder,
+            },
+          });
+        }
+      }
 
       // Clone messages from source conversation (if provided)
       if (dto.sourceConversationId) {
@@ -138,9 +195,13 @@ export class SessionService {
         }
       }
 
-      // Clone highlights and comments from source paper
+      // Clone highlights and comments from ALL source papers
+      const allSourcePaperIds = isMultiPaper
+        ? sourceConvPapers.map((cp: any) => cp.paperId)
+        : [dto.paperId];
+
       const sourceHighlights = await tx.highlight.findMany({
-        where: { paperId: dto.paperId },
+        where: { paperId: { in: allSourcePaperIds } },
         include: {
           comments: {
             orderBy: { createdAt: 'asc' },
@@ -149,11 +210,16 @@ export class SessionService {
         orderBy: { createdAt: 'asc' },
       });
 
-      // Create mapping from old highlight IDs to new highlight IDs
       for (const sourceHighlight of sourceHighlights) {
+        // Find the cloned paper that corresponds to this highlight's source paper
+        const matchingClone = clonedPapers.find(
+          (cp) => cp.original.id === sourceHighlight.paperId,
+        );
+        const targetPaperId = matchingClone?.cloned.id || primaryPaper.id;
+
         const newHighlight = await tx.highlight.create({
           data: {
-            paperId: clonedPaper.id,
+            paperId: targetPaperId,
             userId: sourceHighlight.userId,
             pageNumber: sourceHighlight.pageNumber,
             selectionRects: sourceHighlight.selectionRects,
@@ -165,7 +231,6 @@ export class SessionService {
           },
         });
 
-        // Clone comments for this highlight
         if (sourceHighlight.comments.length > 0) {
           await tx.highlightComment.createMany({
             data: sourceHighlight.comments.map((comment) => ({
@@ -178,18 +243,21 @@ export class SessionService {
         }
       }
 
-      return { clonedPaper, conversation };
+      return { clonedPapers, conversation };
     });
 
-    // 4. Trigger RAG ingestion for the cloned paper (async, don't block)
-    this.triggerRagIngestion(
-      result.clonedPaper.id,
-      clonedRagFileId,
-      paper.fileUrl,
-    ).catch((err) => this.logger.error('Unexpected RAG ingestion error', err));
+    // 5. Trigger RAG ingestion for ALL cloned papers (async, don't block)
+    for (const cp of result.clonedPapers) {
+      this.triggerRagIngestion(
+        cp.cloned.id,
+        cp.cloned.ragFileId,
+        cp.original.fileUrl,
+      ).catch((err) => this.logger.error('Unexpected RAG ingestion error', err));
+    }
 
     this.logger.log(
-      `Group session created: conversation ${result.conversation.id}, cloned paper ${result.clonedPaper.id} from ${dto.paperId}`,
+      `${conversationType} session created: conversation ${result.conversation.id}, ` +
+      `cloned ${result.clonedPapers.length} paper(s) from source`,
     );
 
     const frontendUrl = this.config.get(
@@ -199,7 +267,7 @@ export class SessionService {
 
     return {
       conversationId: result.conversation.id,
-      paperId: result.clonedPaper.id,
+      paperId: result.clonedPapers[0].cloned.id,
       sessionCode,
       inviteLink: `${frontendUrl}/session/join/${inviteToken}`,
       inviteToken,
@@ -279,6 +347,20 @@ export class SessionService {
                 ragFileId: true,
               },
             },
+            conversationPapers: {
+              include: {
+                paper: {
+                  select: {
+                    id: true,
+                    title: true,
+                    fileName: true,
+                    fileUrl: true,
+                    ragFileId: true,
+                  },
+                },
+              },
+              orderBy: { tabOrder: 'asc' },
+            },
           },
         },
       },
@@ -305,12 +387,9 @@ export class SessionService {
     }
 
     // 2. Transaction: membership check/create + use-count increment
-    //    Prevents race conditions on member limit, use count, and
-    //    duplicate inserts (e.g. React StrictMode double-firing).
     let memberRole: string = 'MEMBER';
 
     await this.prisma.$transaction(async (tx) => {
-      // 2a. Check existing membership
       const existingMember = await tx.sessionMember.findUnique({
         where: {
           conversationId_userId: {
@@ -322,18 +401,15 @@ export class SessionService {
 
       if (existingMember) {
         if (existingMember.isActive) {
-          // Already an active member — idempotent success (handles double-fire)
           memberRole = existingMember.role;
           return;
         }
-        // Re-activate if previously left
         await tx.sessionMember.update({
           where: { id: existingMember.id },
           data: { isActive: true, leftAt: null },
         });
         memberRole = existingMember.role;
       } else {
-        // 2b. Check member limit
         const memberCount = await tx.sessionMember.count({
           where: {
             conversationId: invite.conversationId,
@@ -347,7 +423,6 @@ export class SessionService {
           );
         }
 
-        // 2c. Create membership
         try {
           await tx.sessionMember.create({
             data: {
@@ -357,7 +432,6 @@ export class SessionService {
             },
           });
         } catch (error: any) {
-          // Handle unique constraint race (concurrent duplicate request)
           if (error?.code === 'P2002') {
             this.logger.warn(
               `Duplicate join request for user ${userId} in session ${invite.conversationId}`,
@@ -368,7 +442,6 @@ export class SessionService {
         }
       }
 
-      // 2d. Increment invite use count (inside transaction)
       await tx.sessionInvite.update({
         where: { id: invite.id },
         data: { useCount: { increment: 1 } },
@@ -380,6 +453,18 @@ export class SessionService {
 
     this.logger.log(`User ${userId} joined session ${invite.conversationId}`);
 
+    // 4. Build papers[] for multi-paper conversations
+    const convPapers = (invite.conversation as any).conversationPapers || [];
+    const papers = convPapers.length > 0
+      ? convPapers.map((cp: any) => ({
+        id: cp.paper.id,
+        title: cp.paper.title || '',
+        fileName: cp.paper.fileName || '',
+        fileUrl: cp.paper.fileUrl || '',
+        ragFileId: cp.paper.ragFileId || '',
+      }))
+      : undefined;
+
     return {
       conversationId: invite.conversationId,
       sessionCode: invite.conversation.sessionCode!,
@@ -390,6 +475,7 @@ export class SessionService {
       paperUrl: invite.conversation.paper?.fileUrl || '',
       paperRagFileId: invite.conversation.paper?.ragFileId || '',
       members,
+      papers,
     };
   }
 
@@ -683,6 +769,14 @@ export class SessionService {
         paper: {
           select: { id: true, title: true, fileName: true, fileUrl: true },
         },
+        conversationPapers: {
+          include: {
+            paper: {
+              select: { id: true, title: true, fileName: true, fileUrl: true },
+            },
+          },
+          orderBy: { tabOrder: 'asc' },
+        },
       },
     });
 
@@ -691,6 +785,17 @@ export class SessionService {
     }
 
     const members = await this.getSessionMembers(conversationId);
+
+    // Build papers[] for multi-paper conversations
+    const convPapers = (conversation as any).conversationPapers || [];
+    const papers = convPapers.length > 0
+      ? convPapers.map((cp: any) => ({
+        id: cp.paper.id,
+        title: cp.paper.title || '',
+        fileName: cp.paper.fileName || '',
+        fileUrl: cp.paper.fileUrl || '',
+      }))
+      : undefined;
 
     return {
       conversationId: conversation.id,
@@ -703,6 +808,7 @@ export class SessionService {
       paperTitle: conversation.paper?.title || undefined,
       paperFileName: conversation.paper?.fileName || undefined,
       paperUrl: conversation.paper?.fileUrl || undefined,
+      papers,
       createdAt: conversation.createdAt,
     };
   }
@@ -719,6 +825,14 @@ export class SessionService {
             paper: {
               select: { id: true, title: true, fileName: true, fileUrl: true },
             },
+            conversationPapers: {
+              include: {
+                paper: {
+                  select: { id: true, title: true, fileName: true, fileUrl: true },
+                },
+              },
+              orderBy: { tabOrder: 'asc' },
+            },
             _count: {
               select: { sessionMembers: { where: { isActive: true } } },
             },
@@ -730,19 +844,32 @@ export class SessionService {
 
     return memberships
       .filter((m) => m.conversation.isCollaborative)
-      .map((m) => ({
-        conversationId: m.conversation.id,
-        sessionCode: m.conversation.sessionCode || '',
-        isCollaborative: m.conversation.isCollaborative,
-        maxMembers: m.conversation.maxMembers,
-        memberCount: m.conversation._count.sessionMembers,
-        members: [], // Light response — use getSessionDetail for full list
-        paperId: m.conversation.paper?.id,
-        paperTitle: m.conversation.paper?.title || undefined,
-        paperFileName: m.conversation.paper?.fileName || undefined,
-        paperUrl: m.conversation.paper?.fileUrl || undefined,
-        createdAt: m.conversation.createdAt,
-      }));
+      .map((m) => {
+        const convPapers = (m.conversation as any).conversationPapers || [];
+        const papers = convPapers.length > 0
+          ? convPapers.map((cp: any) => ({
+            id: cp.paper.id,
+            title: cp.paper.title || '',
+            fileName: cp.paper.fileName || '',
+            fileUrl: cp.paper.fileUrl || '',
+          }))
+          : undefined;
+
+        return {
+          conversationId: m.conversation.id,
+          sessionCode: m.conversation.sessionCode || '',
+          isCollaborative: m.conversation.isCollaborative,
+          maxMembers: m.conversation.maxMembers,
+          memberCount: m.conversation._count.sessionMembers,
+          members: [], // Light response — use getSessionDetail for full list
+          paperId: m.conversation.paper?.id,
+          paperTitle: m.conversation.paper?.title || undefined,
+          paperFileName: m.conversation.paper?.fileName || undefined,
+          paperUrl: m.conversation.paper?.fileUrl || undefined,
+          papers,
+          createdAt: m.conversation.createdAt,
+        };
+      });
   }
 
   // =========================================================================

@@ -877,21 +877,33 @@ export class ChatService {
 
     let actualConversationId = conversationId;
     let activePaperIds = paperIds || [];
+    let existingConv: any = null;
 
     if (actualConversationId) {
-      // Verify ownership and get conversation papers
-      const existingConv = await this.prisma.conversation.findFirst({
+      // Find the conversation (don't filter by userId — collab members need access)
+      existingConv = await this.prisma.conversation.findFirst({
         where: {
           id: actualConversationId,
-          userId,
           type: ConversationType.MULTI_PAPER,
         },
-        include: { conversationPapers: true }
+        include: {
+          conversationPapers: true,
+          sessionMembers: { where: { userId, isActive: true } },
+        },
       });
 
       if (!existingConv) {
         throw new ForbiddenException(
-          'Conversation not found or not owned by user',
+          'Conversation not found',
+        );
+      }
+
+      // Verify access: user is owner OR active session member
+      const isOwner = existingConv.userId === userId;
+      const isMember = existingConv.sessionMembers?.length > 0;
+      if (!isOwner && !isMember) {
+        throw new ForbiddenException(
+          'You do not have access to this conversation',
         );
       }
 
@@ -926,17 +938,17 @@ export class ChatService {
       throw new BadRequestException('No papers found in this conversation');
     }
 
-    // 1. Verify all active papers belong to user and have ragFileId
+    // 1. Verify all active papers exist and have ragFileId
+    // For collab sessions, papers belong to the session owner — don't filter by userId
     const papers = await this.prisma.paper.findMany({
       where: {
         id: { in: activePaperIds },
-        userId,
       },
     });
 
     if (papers.length !== activePaperIds.length) {
       throw new ForbiddenException(
-        'Some papers not found or not owned by user',
+        'Some papers not found',
       );
     }
 
@@ -983,14 +995,35 @@ export class ChatService {
       },
     });
 
-    // 4. Create user message
+    // 4. Create user message (with userId for collaborative tracking)
     const userMessage = await this.prisma.message.create({
       data: {
         conversationId: actualConversationId,
+        userId,
         role: MessageRole.USER,
         content: question,
       },
     });
+
+    // 4b. Broadcast user message + thinking indicator for collab sessions
+    if (existingConv?.isCollaborative) {
+      const senderUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { displayName: true, avatarUrl: true },
+      });
+
+      this.sessionGateway.broadcastMessage(actualConversationId, {
+        id: userMessage.id,
+        role: 'USER',
+        content: question,
+        userId,
+        displayName: senderUser?.displayName || 'User',
+        avatarUrl: senderUser?.avatarUrl || undefined,
+        createdAt: userMessage.createdAt,
+      });
+
+      this.sessionGateway.broadcastAssistantThinking(actualConversationId, true);
+    }
 
     // 5. Call RAG service with multi-query endpoint + paper summaries
     let ragResponse;
@@ -1059,6 +1092,20 @@ export class ChatService {
     result.assistantMessageId = assistantMessage.id;
     result.userMessageId = userMessage.id;
     result.conversationId = actualConversationId;
+
+    // 10. Broadcast assistant response for collab sessions
+    if (existingConv?.isCollaborative) {
+      this.sessionGateway.broadcastAssistantThinking(actualConversationId, false);
+      this.sessionGateway.broadcastMessage(actualConversationId, {
+        id: assistantMessage.id,
+        role: 'ASSISTANT',
+        content: answerText,
+        context: this.ragService.cleanContextForStorage(
+          ragResponse.context,
+        ) as any,
+        createdAt: assistantMessage.createdAt,
+      });
+    }
 
     return result;
   }
