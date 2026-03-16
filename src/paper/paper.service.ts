@@ -590,19 +590,23 @@ export class PaperService {
     });
 
     if (cached.length > 0) {
+      const baseResults = cached.map((r) => ({
+        arxivId: r.arxivId,
+        title: r.title,
+        abstract: r.abstract,
+        authors: r.authors,
+        categories: r.categories,
+        url: r.url,
+        score: r.score,
+        reason: r.reason,
+        orderIndex: r.orderIndex ?? 0,
+      }));
+
+      const scaledResults = this.rescaleRelatedPaperScores(baseResults);
+
       return {
         paperId: paper.id,
-        results: cached.map((r) => ({
-          arxivId: r.arxivId,
-          title: r.title,
-          abstract: r.abstract,
-          authors: r.authors,
-          categories: r.categories,
-          url: r.url,
-          score: r.score,
-          reason: r.reason,
-          orderIndex: r.orderIndex,
-        })),
+        results: scaledResults,
         fromCache: true,
       };
     }
@@ -634,22 +638,26 @@ export class PaperService {
         });
       }
 
+      const baseResults = (response.results || []).map((r, index) => ({
+        arxivId: r.arxiv_id,
+        title: r.title,
+        abstract: r.abstract,
+        authors: r.authors,
+        categories: r.categories,
+        url: r.url,
+        score: r.score,
+        reason: r.reason,
+        orderIndex: index,
+      }));
+
+      const scaledResults = this.rescaleRelatedPaperScores(baseResults);
+
       return {
         paperId: paper.id,
-        results: (response.results || []).map((r, index) => ({
-          arxivId: r.arxiv_id,
-          title: r.title,
-          abstract: r.abstract,
-          authors: r.authors,
-          categories: r.categories,
-          url: r.url,
-          score: r.score,
-          reason: r.reason,
-          orderIndex: index,
-        })),
+        results: scaledResults,
         fromCache: false,
       };
-    } catch (error) {
+      } catch (error) {
       this.logger.error(
         `Related papers fetch failed for paper: ${paperId}`,
         error,
@@ -664,5 +672,46 @@ export class PaperService {
         `Failed to fetch related papers: ${ragMessage}`,
       );
     }
+  }
+
+  /**
+   * Rescale related paper scores so that percentages are more informative.
+   * - Input scores are assumed to be in [0, 1] from RAG/arXiv re-ranker.
+   * - We map the min→BASE_MIN and max→BASE_MAX, and interpolate others linearly.
+   * - If all scores are equal, we keep them at a mid-high constant so they don't all show 100%.
+   */
+  private rescaleRelatedPaperScores<T extends { score: number }>(
+    items: (T & { orderIndex?: number })[],
+  ): (T & { orderIndex?: number })[] {
+    if (!items.length) return items;
+
+    const scores = items.map((i) => i.score ?? 0);
+    const max = Math.max(...scores);
+    const min = Math.min(...scores);
+
+    // Target range for display: 70%–100%
+    const BASE_MIN = 0.7;
+    const BASE_MAX = 1.0;
+
+    // All scores identical → assign a flat, reasonable score (e.g. 0.85)
+    if (max === min) {
+      return items.map((item) => ({
+        ...item,
+        score: 0.85,
+      }));
+    }
+
+    const range = max - min || 1;
+
+    return items.map((item) => {
+      const raw = item.score ?? 0;
+      const normalized = (raw - min) / range; // 0 → worst, 1 → best
+      const scaled = BASE_MIN + normalized * (BASE_MAX - BASE_MIN);
+
+      return {
+        ...item,
+        score: Number(scaled.toFixed(4)),
+      };
+    });
   }
 }
