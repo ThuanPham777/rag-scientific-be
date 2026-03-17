@@ -343,6 +343,7 @@ export class SessionGateway
       displayName?: string;
       avatarUrl?: string;
       imageUrl?: string;
+      citations?: any[];
       context?: any;
       replyToMessageId?: string;
       replyTo?: {

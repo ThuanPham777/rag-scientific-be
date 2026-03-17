@@ -421,6 +421,9 @@ export class ChatService {
         id: assistantMessage.id,
         role: 'ASSISTANT',
         content: answerText,
+        // Send citations explicitly so other members can render Sources immediately.
+        // (The socket payload previously only had `context`, while FE expects `citations`.)
+        citations: rawCitations.map((c: any) => this.mapCitation(c)),
         context: ragResponse.context,
         createdAt: assistantMessage.createdAt,
       });
@@ -915,7 +918,7 @@ export class ChatService {
         throw new BadRequestException('paperIds is required to start a new multi-paper conversation');
       }
 
-      // Try to find an existing empty or inactive multi-paper conversation... wait, no. 
+      // Try to find an existing empty or inactive multi-paper conversation... wait, no.
       // User requested tabs persist, we shouldn't reuse an arbitrary conversation.
       // We create a new one.
       const conv = await this.prisma.conversation.create({
