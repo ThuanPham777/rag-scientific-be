@@ -84,6 +84,12 @@ export class KbController {
         return { success: true, data: result };
     }
 
+    @Post('papers/bulk-remove')
+    async bulkRemovePapers(@Body('paperIds') paperIds: string[]) {
+        const result = await this.kbService.bulkRemoveFromKb(paperIds);
+        return { success: true, data: result };
+    }
+
     // ─── CLASSIFICATION ────────────────────────────────────────────
 
     @Post('papers/:id/classify')
@@ -145,6 +151,38 @@ export class KbController {
     async getPaperStatus(@Param('id') paperId: string) {
         const result = await this.kbService.getPaperStatus(paperId);
         return { success: true, data: result };
+    }
+
+    // ─── KB EXPLORER (Vector Store Inspection) ───────────────────────
+
+    @Get('explorer/stats')
+    async getExplorerStats() {
+        const stats = await this.kbService.getExplorerStats();
+        return stats;
+    }
+
+    @Get('explorer/duplicates')
+    async getExplorerDuplicates() {
+        const data = await this.kbService.getExplorerDuplicates();
+        return data;
+    }
+
+    @Get('explorer/chunks')
+    async getExplorerChunks(
+        @Query('collection') collection?: string,
+        @Query('paper_id') paperId?: string,
+        @Query('category') category?: string,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        const data = await this.kbService.getExplorerChunks({
+            collection: collection || 'content_store',
+            paper_id: paperId,
+            category,
+            page: page ? parseInt(page, 10) : 1,
+            limit: limit ? parseInt(limit, 10) : 20,
+        });
+        return data;
     }
 
     // ─── BATCH INGEST ───────────────────────────────────────────────

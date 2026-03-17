@@ -378,6 +378,47 @@ export class RagService {
   }
 
   // ============================================================
+  // KB Explorer / Inspect
+  // ============================================================
+
+  /**
+   * Get vector store collection stats
+   */
+  async getCollectionStats(): Promise<Record<string, any>> {
+    const response = await this.http.axiosRef.get(
+      `${this.ragUrl}/inspect/collection-stats`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Get paginated chunks from vector store
+   */
+  async getInspectChunks(params: {
+    collection?: string;
+    paper_id?: string;
+    category?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<any> {
+    const response = await this.http.axiosRef.get(
+      `${this.ragUrl}/inspect/chunks`,
+      { params },
+    );
+    return response.data;
+  }
+
+  /**
+   * Find papers with duplicate content hashes
+   */
+  async getInspectDuplicates(): Promise<any> {
+    const response = await this.http.axiosRef.get(
+      `${this.ragUrl}/inspect/duplicates`,
+    );
+    return response.data;
+  }
+
+  // ============================================================
   // Helper methods for processing RAG context
   // ============================================================
 

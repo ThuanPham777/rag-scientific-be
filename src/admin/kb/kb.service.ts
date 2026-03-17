@@ -166,6 +166,24 @@ export class KbService {
         };
     }
 
+    async bulkRemoveFromKb(paperIds: string[]) {
+        if (!paperIds?.length) return { removed: 0 };
+
+        // Unmark from system KB
+        await this.prisma.paper.updateMany({
+            where: { id: { in: paperIds } },
+            data: { isSystemKb: false },
+        });
+
+        // Remove category associations
+        await this.prisma.kbPaperCategory.deleteMany({
+            where: { paperId: { in: paperIds } },
+        });
+
+        await this.updatePaperCounts();
+        return { removed: paperIds.length };
+    }
+
     async deletePaper(paperId: string) {
         const paper = await this.prisma.paper.findUnique({ where: { id: paperId } });
         if (!paper) throw new NotFoundException(`Paper "${paperId}" not found`);
@@ -460,6 +478,44 @@ export class KbService {
         if (!paper) throw new NotFoundException(`Paper "${paperId}" not found`);
         return paper;
     }
+    // ─── KB EXPLORER (Vector Store Inspection) ────────────────────
+
+    async getExplorerStats() {
+        try {
+            const response = await axios.get(`${this.ragUrl}/inspect/collection-stats`);
+            return response.data;
+        } catch (error: any) {
+            this.logger.error(`Explorer stats failed: ${error.message}`);
+            return {};
+        }
+    }
+
+    async getExplorerDuplicates() {
+        try {
+            const response = await axios.get(`${this.ragUrl}/inspect/duplicates`);
+            return response.data;
+        } catch (error: any) {
+            this.logger.error(`Explorer duplicates failed: ${error.message}`);
+            return { duplicates: [], total: 0 };
+        }
+    }
+
+    async getExplorerChunks(params: {
+        collection?: string;
+        paper_id?: string;
+        category?: string;
+        page?: number;
+        limit?: number;
+    }) {
+        try {
+            const response = await axios.get(`${this.ragUrl}/inspect/chunks`, { params });
+            return response.data;
+        } catch (error: any) {
+            this.logger.error(`Explorer chunks failed: ${error.message}`);
+            return { chunks: [], total: 0, page: 1, limit: 20, totalPages: 0 };
+        }
+    }
+
     // ─── BATCH INGEST ────────────────────────────────────────────────
 
     getMappingTemplate(): string {
